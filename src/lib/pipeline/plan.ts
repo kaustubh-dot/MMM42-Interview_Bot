@@ -10,8 +10,10 @@ import { generateJson } from "../llm";
 import { identityValuesFrom } from "../prompts/pipeline/blind";
 import { toClientPlan } from "./client-projection";
 import { PipelineError } from "./errors";
-import { type SessionStore, mockSessionStore } from "./mock-session-store";
+import type { AttemptMeta, SessionStore } from "./mock-session-store";
 import { rememberPlanIdentities } from "./scoring-context";
+import { sessionStore } from "./session-store";
+import { id } from "./turn-service";
 
 const text = z.string().trim().min(1).max(2000);
 const snippet = z.object({
@@ -573,22 +575,50 @@ export function normalizePlanDraft(raw: unknown, resumeText = "", jdText = ""): 
   };
 }
 
-export async function createPlannedAttempt(form: FormData, store: SessionStore = mockSessionStore) {
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Optional role link and contact fields. Stored on the response row only, never scored. */
+export function attemptMeta(form: FormData): AttemptMeta {
+  const field = (key: string) => {
+    const value = form.get(key);
+    return typeof value === "string" && value.trim() ? value.trim() : undefined;
+  };
+  const roleId = field("roleId");
+  const candidateName = field("candidateName");
+  const candidateEmail = field("candidateEmail");
+  if (candidateName && candidateName.length > 200) {
+    throw new PipelineError("INVALID_INPUT", "candidateName must be at most 200 characters.", 400);
+  }
+  if (candidateEmail && (candidateEmail.length > 320 || !EMAIL.test(candidateEmail))) {
+    throw new PipelineError("INVALID_INPUT", "candidateEmail is not a valid email address.", 400);
+  }
+  return {
+    ...(roleId && { roleId: id(roleId, "roleId") }),
+    ...(candidateName && { candidateName }),
+    ...(candidateEmail && { candidateEmail }),
+  };
+}
+
+export async function createPlannedAttempt(form: FormData, store: SessionStore = sessionStore) {
+  const meta = attemptMeta(form);
   const { plan, identityValues } = await generatePlan(form);
-  await store.createSession({
-    record: {
-      plan,
-      candidateLabel: "Candidate A",
-      startedAt: new Date().toISOString(),
-      turns: [],
-      decisions: [],
-      integrityEvents: [],
+  await store.createSession(
+    {
+      record: {
+        plan,
+        candidateLabel: "Candidate A",
+        startedAt: new Date().toISOString(),
+        turns: [],
+        decisions: [],
+        integrityEvents: [],
+      },
+      lastRequestId: null,
+      lastReply: null,
+      finished: false,
+      faceSignals: { available: false, reason: "Capture has not started." },
     },
-    lastRequestId: null,
-    lastReply: null,
-    finished: false,
-    faceSignals: { available: false, reason: "Capture has not started." },
-  });
+    { ...meta, identityValues },
+  );
   rememberPlanIdentities(plan.interviewId, identityValues);
   return { plan: toClientPlan(plan) };
 }

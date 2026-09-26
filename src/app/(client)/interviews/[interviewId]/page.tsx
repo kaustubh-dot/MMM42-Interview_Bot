@@ -3,6 +3,11 @@
 import CallInfo from "@/components/call/callInfo";
 import Modal from "@/components/dashboard/Modal";
 import EditInterview from "@/components/dashboard/interview/editInterview";
+import {
+  PipelineLinkButton,
+  PipelineResponseItem,
+  isPipelineResponse,
+} from "@/components/dashboard/interview/pipelineResponse";
 import SharePopup from "@/components/dashboard/interview/sharePopup";
 import SummaryInfo from "@/components/dashboard/interview/summaryInfo";
 import LoaderWithText from "@/components/loaders/loader-with-text/loaderWithText";
@@ -234,6 +239,10 @@ function InterviewHome({ params, searchParams }: Props) {
     return responses?.filter((response) => response?.candidate_status === filterStatus);
   };
 
+  // Retell call responses keep the original rendering; pipeline rows render separately above.
+  const legacyResponses = () =>
+    filterResponses().filter((response) => !isPipelineResponse(response));
+
   return (
     <div className="flex flex-col w-full h-full m-2 bg-white">
       {loading ? (
@@ -253,6 +262,8 @@ function InterviewHome({ params, searchParams }: Props) {
             <div className="flex flex-row gap-3 my-auto">
               <UserIcon className="my-auto" size={16} />: {String(responses?.length)}
             </div>
+
+            <PipelineLinkButton interviewId={interview?.id ?? resolvedParams.interviewId} />
 
             <TooltipProvider>
               <Tooltip>
@@ -401,8 +412,17 @@ function InterviewHome({ params, searchParams }: Props) {
               </div>
 
               <ScrollArea className="h-full p-1 rounded-md border-none">
+                {filterResponses()
+                  .filter(isPipelineResponse)
+                  .map((response) => (
+                    <PipelineResponseItem
+                      key={response.id}
+                      response={response}
+                      onOpen={handleResponseClick}
+                    />
+                  ))}
                 {filterResponses().length > 0 ? (
-                  filterResponses().map((response) => (
+                  legacyResponses().map((response) => (
                     <button
                       type="button"
                       className={`p-2 rounded-md hover:bg-indigo-100 border-2 my-1 text-left text-xs ${
