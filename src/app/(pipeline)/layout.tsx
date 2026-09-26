@@ -16,7 +16,9 @@ export const metadata: Metadata = {
 // backend configured. The legacy FoloUp dashboard keeps its own layouts.
 export default function PipelineLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    // Browser extensions can add root attributes (for example class="hydrated")
+    // before React starts. Ignore only that root-attribute mismatch.
+    <html lang="en" suppressHydrationWarning>
       <body
         suppressHydrationWarning
         className={`${dmSans.className} nb flex min-h-screen flex-col antialiased`}

@@ -20,13 +20,15 @@ interface Options {
 }
 
 export interface BrowserIntegrity {
+  /** Merge optional face events into this same delivery queue. */
+  pushEvent: (event: IntegrityEvent) => void;
   events: IntegrityEvent[];
   tabBlurCount: number;
   pasteCount: number;
   /** True while the page is hidden; used to show the (non-blocking) notice. */
   showTabNotice: boolean;
   dismissTabNotice: () => void;
-  /** Events not yet acknowledged by the server. */
+  /** Next delivery batch, at most the turn API's 100-event limit. */
   pendingEvents: () => IntegrityEvent[];
   /** Marks the first `count` events as delivered after a successful submit. */
   acknowledge: (count: number) => void;
@@ -104,12 +106,13 @@ export function useBrowserIntegrity({
   }, [active, startedAtPerf, push]);
 
   return {
+    pushEvent: push,
     events,
     tabBlurCount: events.filter((e) => e.kind === "tabBlur").length,
     pasteCount: events.filter((e) => e.kind === "paste").length,
     showTabNotice,
     dismissTabNotice: () => setShowTabNotice(false),
-    pendingEvents: () => eventsRef.current.slice(deliveredRef.current),
+    pendingEvents: () => eventsRef.current.slice(deliveredRef.current, deliveredRef.current + 100),
     acknowledge: (count: number) => {
       deliveredRef.current = Math.min(eventsRef.current.length, deliveredRef.current + count);
     },
