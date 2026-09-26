@@ -77,14 +77,25 @@ async function generateGroqJson(request: LlmRequest): Promise<unknown> {
         continue;
       }
       if (!response.ok) {
+        const providerMessage = await response.text().catch(() => "");
+        if (process.env.NODE_ENV !== "production" || process.env.PIPELINE_DEBUG === "1") {
+          console.error("[llm] Groq request failed", request.task, response.status, providerMessage);
+        }
         throw new Error(`status ${response.status}`);
       }
       const body = (await response.json()) as { choices?: { message?: { content?: string } }[] };
       text = body.choices?.[0]?.message?.content;
       break;
     }
-  } catch {
+  } catch (error) {
     // Provider errors may contain credentials or candidate input. Do not forward them.
+    if (process.env.NODE_ENV !== "production" || process.env.PIPELINE_DEBUG === "1") {
+      console.error(
+        "[llm] Groq request threw",
+        request.task,
+        error instanceof Error ? error.message : error,
+      );
+    }
     throw new LlmError(
       "LLM_UPSTREAM",
       `The ${request.task} model request failed. Retry the request.`,
