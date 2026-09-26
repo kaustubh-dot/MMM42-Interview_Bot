@@ -4,6 +4,8 @@ An AI interview platform that asks about the specific claims on a candidate's re
 
 **Start with [`CLAUDE.md`](CLAUDE.md).** It holds the pillars, owners, data contract, rules, hour plan and cut list.
 
+**Assign work using the [team implementation plan](docs/superpowers/plans/2026-09-26-team-kickoff.md).** A/B/C start now; D joins later. It includes file ownership, handoff interfaces, acceptance checks and copyable teammate briefs. The approved scope now includes Monaco code editing/submission and an Excalidraw whiteboard; these features are planned, not implemented yet. Code execution is deferred.
+
 ## Quick start
 
 ```bash

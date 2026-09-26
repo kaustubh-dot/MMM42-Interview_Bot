@@ -1,7 +1,8 @@
 # CLAUDE.md: source of truth for the hackathon build
 
 > If code and this file disagree, that is a bug. Fix whichever one is wrong, in the same change.
-> Last updated: 2026-09-26, setup session (contract + fixture only, no feature code yet).
+> Last updated: 2026-09-26, approved scope and team-plan revision. Contract + fixture exist; feature implementation has not started.
+> Assignment checklist: [Team implementation plan](docs/superpowers/plans/2026-09-26-team-kickoff.md). A, B and C start now; D joins later. Planned additions below are requirements, not claims of implemented behavior.
 
 ## 1. Summary
 
@@ -12,6 +13,8 @@ We are building an AI interview platform on top of the FoloUp codebase (Next.js 
 2. **An explainable adaptive selection rule.** One deterministic rule, and every turn logs a machine-readable reason code shown live in the UI.
 3. **Evidence-cited evaluation + scoped bias audit.** Every score cites character offsets in the transcript, validated in code. A separate auditor pass checks a fixed 3-item fairness checklist and is shown in the report.
 4. **Integrity monitoring as a concern band.** Low / Medium / High with every signal, threshold and benign explanation visible. It never produces a verdict and never affects scores.
+
+**Approved technical workspace:** adapt Aural's Monaco editor and Excalidraw whiteboard. Candidates write code or draw a design while explaining aloud; submissions are saved for recruiter review. This release scores spoken evidence only. Code execution, automated diagram grading and collaborative editing are outside this release.
 
 ## 2. Stack (pinned; anything else must be flagged to the team first)
 
@@ -24,6 +27,8 @@ We are building an AI interview platform on top of the FoloUp codebase (Next.js 
 | Face / gaze signals | `@mediapipe/tasks-vision` Face Landmarker, **approved new library**, flag `NEXT_PUBLIC_FACE_SIGNALS=on\|off` | Runs in the browser, so no video leaves the device. Adds face-count and gaze signals. If it fails to load, the band ignores those signals. |
 | PDF parsing | `src/actions/parse-pdf.ts` (LangChain PDFLoader) | Already in FoloUp. Reused for both resume and JD. |
 | UI | Tailwind + shadcn/Radix (existing `src/components/ui`) | Already in FoloUp. |
+| Code editor | `@monaco-editor/react` + `monaco-editor`, **approved new libraries; not installed yet** | Adapt Aural's editor wrapper; editing/submission and read-only review. Select React 18-compatible versions. |
+| Whiteboard | `@excalidraw/excalidraw`, **approved new library; not installed yet** | Adapt Aural's canvas wrapper and styles; editable scenes and read-only review. Select a React 18-compatible version. |
 | Hash chain | Node `crypto` sha256 | Built in. |
 | Lint | Biome (`npm run check:ci` in CI) | Already in FoloUp. |
 
@@ -36,7 +41,7 @@ Status values: `not started` → `in progress` → `demo path works` → `done`.
 ### Pillar 1: Profile-aware questioning. Owner: **A** (C supports with UI)
 - **Done looks like:** upload a resume PDF + paste or upload a JD → `InterviewPlan` with ranked `Claim[]`.
   - Each claim has verbatim `resumeEvidence` + `jdRequirement` and a full `QuestionLadder`.
-  - Technical claims also get a `codeSnippet` with a planted issue.
+  - Coding workspaces get a `codeSnippet` with a planted issue; whiteboard workspaces get a concrete system-design prompt.
   - Ranking is `jdWeight × (1 − specificity)`: vague claims about things the JD needs are probed first.
   - The first question must name a concrete resume detail and ask about mechanism, trade-off or failure. Reject "tell me about X".
 - **Status:** not started. The fixture plan exists in `src/fixtures/golden-interview.ts`.
@@ -55,7 +60,7 @@ Status values: `not started` → `in progress` → `demo path works` → `done`.
   - The counterfactual rescoring is **precomputed on the golden sample only**.
 - **Status:** not started. The precomputed evaluation and audit for the sample are in the fixture (the stage backup already exists).
 
-### Pillar 4: Integrity monitoring. Owner: **D** capture / **B** fusion
+### Pillar 4: Integrity monitoring. Owner: **C** tab/paste capture / **D** face capture / **B** fusion
 - **Done looks like:**
   - `IntegrityEvent`s captured during the interview: tab blur/focus (fix the FoloUp double-hook bug), paste, and the MediaPipe events faceMissing >3s, multipleFaces >1.5s and lookAway >12s.
   - Deterministic fusion into an `IntegrityReport` (points table in §5).
@@ -68,10 +73,16 @@ Status values: `not started` → `in progress` → `demo path works` → `done`.
 - `entryHash = sha256("v1|prevHash|seq|kind|refId|canonical_json(payload)")` over turns → decisions → evaluation. The genesis `prevHash` is 64 zeros. Canonical JSON uses sorted keys and drops undefined values.
 - A "Verify" button recomputes the chain. It detects edits (hash mismatch), deletions (seq gap) and re-linking (prevHash mismatch).
 - **Status:** not started. The reference `buildChain` is in the fixture script, and the fixture has 27 chain entries.
+- Lower priority than the four pillars, saved code/whiteboard submissions, deployment and rehearsal. Include artifacts in their parent turn payload when hashing; a transcript-only check must not be presented as protecting drawings or code.
 
-### Code-reasoning rung (technical roles). Owner: **A** + **C**, scheduled for 5:00–6:00
-- On the `scenarioTwist` rung for claims with `isTechnical`, show `ladder.codeSnippet.code` read-only in a `<pre>`. The candidate explains the bug out loud and can optionally type a fix (`Turn.typedAnswer`). Same rule, rubric and validator. `plantedIssue` is never sent to the client.
-- **Status:** not started. The fixture includes a SQL snippet on claim `c2`.
+### Technical workspace: Monaco + Excalidraw. Owner: **C** UI / **A** question and turn integration / **D** persistence / **B** evidence boundaries
+- On a technical claim's `scenarioTwist` rung, open either the code editor or whiteboard according to the plan. Other rungs keep the spoken flow. This does not add a new ladder rung or change selection budgets.
+- Code mode: preload `ladder.codeSnippet.code` and language in Monaco; accept edited code and a spoken explanation. No Run button or execution service. `plantedIssue` stays on the server, including in plan, record, fixture and report responses sent to the browser.
+- Whiteboard mode: show a system-design prompt, let the candidate draw and explain, and retain the editable scene for read-only recruiter review. Images, uploads and collaboration are disabled in the first version.
+- Link final snapshots to the candidate turn; save drafts separately from submitted answers. Submit captures current state immediately rather than waiting for a debounced callback. Explicitly save cleared content, and show save failure/retry without losing edits.
+- For this release, the grader and evaluator score only the spoken explanation. Code and drawings are labeled **supporting artifact — human review**. No code/diagram score or correctness verdict is implied. Citations remain offsets into `Turn.text`; do not silently append code or diagram descriptions to it.
+- Adapt the upstream components with local loading/error fallbacks, React 18-compatible dependencies, and retained MIT attribution. Aural's relay servers, tRPC, auth and database migrations are not needed for these wrappers.
+- **Status:** not started. The existing fixture has SQL starter code; add separately labeled code/whiteboard demo submissions without invalidating the original golden fixture.
 
 ## 4. Data contract (the most important section)
 
@@ -95,6 +106,18 @@ Status values: `not started` → `in progress` → `demo path works` → `done`.
 - the integrity output has no verdict-like keys or yes/no fields
 
 Build against the fixture until the upstream pillar is live. `LLM_MODE=mock` should make every LLM call return fixture data (to be implemented in the `src/lib/llm.ts` adapter).
+
+### Approved contract work to land first (A owns implementation)
+
+The following is the implementation target approved with the workspace scope. It is **not yet present** in `src/types/pipeline.ts`. A lands the shared types and client-safe projections first; B/C/D consume that change before connecting live modules. Any further change still follows §6.
+
+- Add optional `QuestionLadder.workspace`: `{ kind: "code" } | { kind: "whiteboard"; prompt: string }`. A code workspace requires `codeSnippet`. Existing technical plans with a snippet and no workspace continue to select code mode. A whiteboard workspace uses its prompt at `scenarioTwist`; other rungs use the existing ladder.
+- Add optional `Turn.artifacts: AnswerArtifact[]`, where `AnswerArtifact` is `{ kind: "code"; language: string; code: string } | { kind: "whiteboard"; sceneJson: string }`. Version 1 allows at most one artifact per candidate turn, matching that question's workspace. The parent turn provides ID, claim and timing; no new artifact citation format is introduced.
+- `sceneJson` contains only the drawing elements and whitelisted display state, with no binary files or collaborators. Validate it on the server. Limit code to 100 KiB UTF-8 and scene JSON to 500 KiB UTF-8; reject oversized submissions visibly while retaining the local draft.
+- Keep `typedAnswer` for compatibility: for code submissions, the server derives it from the code artifact and rejects contradictory duplicate input. Whiteboard submissions do not populate it. Existing turns without artifacts remain valid.
+- Client-safe plan/record/report types recursively omit `plantedIssue`. Server prompts receive only the fields they need; artifacts are excluded from scoring inputs in this release. A browser fallback must also use the sanitized fixture.
+- Store submitted artifacts inside `response.details.turns`; drafts do not become graded turns. `response.analytics` remains `{ evaluation, audit, integrity }`. Session metadata (last accepted request/reply, completion and face-signal availability) can accompany the record in the existing details JSON object; expose only contracted fields through client projections. No SQL column additions or migrations are planned.
+- The existing golden fixture remains the regression reference. A owns its generator; add an independent workspace fixture for code/scene examples so existing citation offsets and chain expectations remain stable.
 
 ## 5. Rules (state these out loud in the demo)
 
@@ -143,17 +166,21 @@ Build against the fixture until the upstream pillar is live. `LLM_MODE=mock` sho
 
 Also from the brief: the auditor is **exactly one** extra pass. Don't build a multi-agent framework or add more "contradicting agents".
 
-## 7. Hour plan (6h build + 1h protected demo buffer; total hackathon length TODO(team))
+## 7. Team plan (A/B/C start now; D joins later)
+
+Use this as a provisional 6-hour build plus 1-hour protected demo buffer. Confirm the actual deadline and D's arrival at kickoff; milestones depend on deliverables, not an assumed arrival time. Detailed tasks, file ownership, interfaces and acceptance checks are in the [assignment plan](docs/superpowers/plans/2026-09-26-team-kickoff.md).
 
 | Time | A | B | C | D |
 |---|---|---|---|---|
-| 0:00–0:30 | Read this file + contract | same | same | same |
-| 0:30–2:00 | P1 route: parse → claims + ladders | Grader + evaluator + citation validator on the fixture | Upload page + claims view (on the fixture) | `src/lib/llm.ts` adapter (`LLM_MODE`), turn-loop API skeleton, tab/paste capture |
-| 2:00–3:30 | Live voice turn loop + `selectNext` | Auditor + integrity fusion | Live interview view + decision-log panel | MediaPipe capture, Supabase persistence |
-| 3:30–5:00 | Integration | Precompute the backup run | Recruiter report page (click-to-highlight citations) | Deploy, end-to-end run |
-| 5:00–6:00 | Code-reasoning rung | Fixes | Code-rung UI | Hash chain + Verify |
+| 0:00–0:30 | Land contract, client-safe projections and mock adapter interfaces | Read rubric and fixture; start pure citation/fusion logic | Set up fixture screens and inspect Aural wrappers | Not on the critical path; read handoff when joining |
+| 0:30–2:00 | Implement `selectNext`, mock turn API and resume/JD plan generation | Grader, citation validator and evaluator on fixture | Upload/claims flow, interview shell, Monaco and Excalidraw with local snapshots | When available: environment/deploy baseline, then persistence service |
+| 2:00–3:30 | Connect live grading and turn state; workspace question selection | Auditor, integrity fusion, sample-only counterfactual | Browser speech, decision log, tab/paste capture, report components | Persist/resume records and artifacts; publish preview |
+| 3:30–5:00 | Integrate save/resume service and report endpoint | Verify transcript-only scores and report evidence | Complete report, artifact replay and one-click fallback | End-to-end integration; MediaPipe after saved demo path works |
+| 5:00–6:00 | Fixes and integration support | Fixes and evidence review | Fixes and report polish | Deployment/rehearsal; hash chain only if everything above is ready |
 | **6:00** | **Feature freeze** | | | |
 | 6:00–7:00 | Rehearse the demo twice, once on the fixture fallback | | | D owns the demo |
+
+**If D is late:** A/B/C keep building against fixture and local drafts. D's priority is persistence, deployment and rehearsal. If D misses the integration checkpoint, A takes persistence, C takes deployment, B coordinates checks; drop hash chain and label face signals unavailable until working. Announce any deferred feature rather than presenting a mock as live.
 
 ## 8. Judging criteria map (Design 5 · Functionality 14 · Innovation 10 · Feasibility 7 · Scalability 6 · Demonstration 8)
 
@@ -161,9 +188,9 @@ Also from the brief: the auditor is **exactly one** extra pass. Don't build a mu
 - **Innovation (10):** none of the 7 reference repos combines all four differentiators (§1). Plus in-browser face signals and the hash chain.
 - **Demonstration (8), 5-minute script:**
   1. Upload → ranked claims (30s).
-  2. Live interview for 3–4 turns with the decision log ticking (90s).
-  3. Report (90s): click a score to highlight its quote → audit section + counterfactual → concern band with its signals and benign explanations.
-  4. Edit a DB row → Verify shows the chain broken (30s).
+  2. Live interview and one technical submission with the decision log ticking (90s); use a short fixture replay if live turns exceed the time box.
+  3. Report (90s): click a score to highlight its quote → saved code/drawing for human review → audit section + labeled sample counterfactual → concern band and benign explanations.
+  4. Reopen the submitted workspace to show retained code/drawing (30s). Substitute the tamper/Verify demonstration only if the hash-chain stretch is completed and checked.
   5. Close on the cut list and the "not a verdict" principle (30s).
   
   One-click fixture fallback at every step.
@@ -182,6 +209,7 @@ Also from the brief: the auditor is **exactly one** extra pass. Don't build a mu
 
 | Repo | Adopted | Rejected |
 |---|---|---|
+| [1146345502/aural-oss](https://github.com/1146345502/aural-oss) | Monaco and Excalidraw wrappers, snapshot/restore and read-only review patterns; retain MIT attribution and record the source commit | Whole-platform migration, voice relays, tRPC/auth/schema, paste blocking, automatic artifact grading |
 | [thrinay296/InterviewAI](https://github.com/thrinay296/InterviewAI) | The 4-rung chain (initial → term follow-up → scenario twist → why-defense); resume-specific questions; the "drop-off" note; persistence thresholds for face signals | Auto-terminating after 3 warnings; integrity weighted into the score |
 | [ngoanpv/DeepInterview](https://github.com/ngoanpv/DeepInterview) | Heavy work before the call, light during it (precomputed ladders); mock-first provider adapters; ScoreCard next steps → candidate feedback | LiveKit / LangGraph (too heavy for 6h) |
 | [abhay-yemekar/hirelens](https://github.com/abhay-yemekar/hirelens) | Character-offset evidence validated in code; click-to-highlight; anchored rubric | Recruiter-editable rubric (cut) |
@@ -194,7 +222,7 @@ Also from the brief: the auditor is **exactly one** extra pass. Don't build a mu
 
 **Reuse:**
 - `src/actions/parse-pdf.ts` (PDF → text)
-- the Gemini call pattern in `src/services/analytics.service.ts` (`new GoogleGenAI(...)`, `gemini-2.5-flash`, JSON mode). There's no shared helper yet, so `src/lib/llm.ts` is to be created by D.
+- the Gemini call pattern in `src/services/analytics.service.ts` (`new GoogleGenAI(...)`, `gemini-2.5-flash`, JSON mode). There's no shared helper yet, so **A creates `src/lib/llm.ts` first**; B uses its published interface.
 - `src/components/ui/*` (shadcn)
 - the Supabase services in `src/services/*`
 - the camera `getUserMedia` setup in `src/components/call/index.tsx`
@@ -206,13 +234,21 @@ Also from the brief: the auditor is **exactly one** extra pass. Don't build a mu
 - the Retell routes (`register-call`, `create-interviewer`, `get-call`), which the turn loop replaces
 - hardcoded `"default-org"` in the contexts: leave it (auth is cut)
 
+**Aural reuse targets (C owns adaptation):**
+- `src/components/code-editor/code-editor-canvas.tsx`
+- `src/components/whiteboard/whiteboard-canvas.tsx`
+- `src/components/whiteboard/whiteboard-overrides.css`
+- Inspect the upstream functional harnesses for useful save/load cases. Pin the source commit and record local modifications in `THIRD_PARTY_NOTICES.md` when copying. Copy only the needed wrappers/styles; inspect package compatibility instead of importing Aural's package manifest.
+
 ## 12. Cut list (running; add the date and reason for every cut)
 
 | Cut | Why |
 |---|---|
 | Real auth | FoloUp has none. It doesn't score in judging, and D's time goes to making the demo work. |
 | Retell voice | Its hosted LLM picks the questions, so the explicit logged rule is impossible. Replaced by the Web Speech API turn loop. |
-| Full coding IDE + code execution | Needs a new library (Monaco) plus a sandbox (security/infra risk), and adds little Innovation. Replaced by the code-reasoning rung. |
+| Code execution / sandbox / terminal | 2026-09-26 revision: Monaco editing and submission are approved; running candidate code needs a separate execution service and remains deferred. |
+| Automated artifact scoring and code/diagram citations | 2026-09-26: keep validated spoken evidence as the scoring basis; saved artifacts are available for human review. |
+| Collaborative whiteboard and image uploads | 2026-09-26: single-candidate shapes/text drawing is sufficient for the technical demo. |
 | Recruiter-editable rubric | The rubric is fixed and shown, not editable. |
 | Live counterfactual audit | Adds latency on stage. Precomputed on the golden sample only. |
 | Webcam recording upload | Not needed by any pillar. |
@@ -221,5 +257,6 @@ Also from the brief: the auditor is **exactly one** extra pass. Don't build a mu
 ## 13. Open TODO(team)
 
 - Fill in the total hackathon length.
+- Assign actual names to A/B/C/D and record D's expected joining time in the team plan. Unknown arrival time does not block A/B/C.
 - Approve or deny any Supabase column additions (the current plan needs none).
 - Confirm a Chrome-only demo machine (the Web Speech API requirement).
