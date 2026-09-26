@@ -270,11 +270,54 @@ export async function generatePlan(form: FormData) {
     input: { resumeText, jdText: jobText },
     mockOutput: JSON.parse(JSON.stringify(mockDraft())) as JsonValue,
   });
-  return validatePlan(normalizePlanDraft(raw), resumeText, jobText);
+  return validatePlan(normalizePlanDraft(raw, resumeText, jobText), resumeText, jobText);
+}
+
+const FOLD: Record<string, string> = {
+  "‘": "'",
+  "’": "'",
+  "“": '"',
+  "”": '"',
+  "–": "-",
+  "—": "-",
+  "•": "",
+  " ": " ",
+};
+
+/**
+ * PDF text has line breaks, doubled spaces, bullets and curly quotes that models tidy up. Find the
+ * excerpt in the source ignoring only those differences and case, and return the EXACT source span,
+ * so the strict validator still guarantees the evidence is really in the document.
+ */
+export function snapToSource(excerpt: unknown, source: string): unknown {
+  if (typeof excerpt !== "string" || !excerpt.trim() || source.includes(excerpt)) {
+    return excerpt;
+  }
+  const fold = (ch: string) => (ch in FOLD ? FOLD[ch] : ch.toLowerCase());
+  let normSource = "";
+  const map: number[] = []; // normSource index -> source index
+  for (let i = 0; i < source.length; i++) {
+    const ch = /\s/.test(source[i]) ? " " : fold(source[i]);
+    if (ch === "" || (ch === " " && (normSource === "" || normSource.endsWith(" ")))) {
+      continue;
+    }
+    normSource += ch;
+    map.push(i);
+  }
+  const needle = Array.from(excerpt)
+    .map((ch) => (/\s/.test(ch) ? " " : fold(ch)))
+    .join("")
+    .replace(/ +/g, " ")
+    .trim();
+  const at = needle ? normSource.indexOf(needle) : -1;
+  if (at < 0) {
+    return excerpt; // not really in the source: leave it for the validator to reject
+  }
+  return source.slice(map[at], map[at + needle.length - 1] + 1);
 }
 
 /** Fix common model shape slips before strict validation; never invents claims or evidence. */
-export function normalizePlanDraft(raw: unknown): unknown {
+export function normalizePlanDraft(raw: unknown, resumeText = "", jdText = ""): unknown {
   if (
     typeof raw !== "object" ||
     raw === null ||
@@ -297,14 +340,18 @@ export function normalizePlanDraft(raw: unknown): unknown {
     ...(draft.identityValues !== undefined && {
       identityValues: Array.from(new Set(flatStrings(draft.identityValues))),
     }),
-    claims: draft.claims.map((item) => {
+    claims: draft.claims.map((item, index) => {
       if (typeof item !== "object" || item === null || Array.isArray(item)) {
         return item;
       }
       const { workspace, codeSnippet, ...claim } = item as Record<string, unknown>;
+      // IDs are arbitrary draft labels (nothing references them yet): renumber to avoid duplicates.
+      claim.id = `c${index + 1}`;
+      claim.resumeEvidence = snapToSource(claim.resumeEvidence, resumeText);
+      claim.jdRequirement = snapToSource(claim.jdRequirement, jdText);
       const ladder = claim.ladder;
       if (typeof ladder !== "object" || ladder === null || Array.isArray(ladder)) {
-        return item;
+        return { ...claim, workspace, codeSnippet };
       }
       const nested = { ...(ladder as Record<string, unknown>) };
       if (workspace !== undefined && nested.workspace === undefined) {
