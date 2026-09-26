@@ -11,6 +11,7 @@ const LINKS = [
   { href: "/#how-it-works", label: "How it works" },
   { href: "/practice", label: "Practice" },
   { href: "/report/sample", label: "Sample report" },
+  { href: "/admin", label: "Recruiters" },
 ];
 
 export function AppNavbar() {

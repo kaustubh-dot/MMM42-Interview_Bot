@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.foundation.json",
+  "include": [
+    "src/types/pipeline.ts",
+    "src/types/pipeline-api.ts",
+    "src/lib/pipeline/report-status.ts",
+    "src/lib/admin/*.ts"
+  ]
+}
