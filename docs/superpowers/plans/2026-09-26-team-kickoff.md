@@ -12,7 +12,7 @@
 
 ## Scope and working rules
 
-- All feature tasks below start **not started**. Existing assets are the FoloUp shell, shared pipeline types, golden fixture and reference algorithms.
+- A1 foundation is implemented on `feat/interview-engine`; its publication/merge is the first handoff. A2/A3 and B/C/D tasks remain unstarted in this checkout. Existing assets include the FoloUp shell, golden fixture and reference algorithms.
 - A/B/C start now. D's arrival is unknown; use the arrival checklist below rather than blocking the first three teammates.
 - Provisionally allow six hours of build time and one protected rehearsal hour. Record actual names, deadline and D's arrival in the kickoff discussion before assigning calendar times.
 - Keep the selection rule, shared 0–3 rubric and integrity thresholds in `CLAUDE.md` unchanged.
@@ -160,10 +160,10 @@ Use `{ error: { code: string; message: string } }` for errors. Invalid input is 
 
 **Files:** A-owned shared types, `llm.ts`, `client-projection.ts`, workspace fixture, package/config files.
 
-- [ ] Add the optional workspace/artifact contract and API types above. Leave existing golden data valid.
-- [ ] Implement explicit allowlisted client projections that remove `plantedIssue` at every nested level. Export sanitized fixture data for C; do not import the full server fixture into client bundles.
-- [ ] Implement server-only `generateJson`: `LLM_MODE=mock` returns the supplied fixture output with no network call; `gemini` calls Gemini 2.5 Flash in JSON mode. Reject unknown modes and missing live credentials clearly; do not silently present mock results as live.
-- [ ] Add a separate workspace fixture with a code submission and a small shapes/text scene. Keep original golden transcript/citations/chain unchanged.
+- [x] Add the optional workspace/artifact contract and API types above. Leave existing golden data valid.
+- [x] Implement explicit allowlisted client projections that remove `plantedIssue` at every nested level. Export sanitized fixture data for C; do not import the full server fixture into client bundles.
+- [x] Implement server-only `generateJson`: `LLM_MODE=mock` returns the supplied fixture output with no network call; `gemini` calls Gemini 2.5 Flash in JSON mode. Reject unknown modes and missing live credentials clearly; do not silently present mock results as live.
+- [x] Add a separate workspace fixture with a code submission and a small shapes/text scene. Keep original golden transcript/citations/chain unchanged.
 - [ ] Publish this shared commit to B/C and agree package/lockfile ownership. B can work on existing types before this lands; C can build presentation against sanitized data.
 
 **Acceptance:** old golden data still satisfies its contract; client fixture and serialized responses contain no `plantedIssue`; mock mode works without a Gemini key; optional artifact fields do not break old records.

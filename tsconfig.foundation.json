@@ -1,0 +1,21 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "noEmit": false,
+    "noEmitOnError": true,
+    "incremental": false,
+    "rootDir": "src",
+    "outDir": ".foundation-build"
+  },
+  "include": [
+    "src/types/pipeline.ts",
+    "src/types/pipeline-api.ts",
+    "src/lib/llm.ts",
+    "src/lib/pipeline/client-projection.ts",
+    "src/fixtures/*.ts"
+  ],
+  "exclude": ["node_modules", ".foundation-build"]
+}

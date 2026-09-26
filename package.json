@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "build:foundation": "tsc -p tsconfig.foundation.json",
+    "test:foundation": "npm run build:foundation && node --conditions=react-server --test tests/pipeline-foundation.test.cjs",
+    "fixture:client": "npm run build:foundation && node --conditions=react-server scripts/build-client-fixture.cjs && biome check --write src/fixtures/client-golden-interview.ts",
     "dev": "next dev --webpack",
     "build": "next build --webpack",
     "start": "next start",
@@ -70,6 +73,7 @@
     "react-hook-form": "^7.49.0",
     "retell-client-js-sdk": "^2.0.0",
     "retell-sdk": "^4.19.0",
+    "server-only": "0.0.1",
     "shadcn-ui": "^0.4.1",
     "sharp": "^0.33.2",
     "sonner": "^1.4.41",
