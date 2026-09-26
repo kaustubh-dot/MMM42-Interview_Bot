@@ -92,7 +92,9 @@ export function PracticeWorkspace() {
     <div className="nb-orbs alt">
       <div className="mx-auto max-w-6xl space-y-6 px-4 py-8 md:px-6">
         <header className="space-y-2">
-          <h1 className="text-3xl font-black tracking-tight md:text-4xl">Practice workspace</h1>
+          <h1 className="text-3xl font-black tracking-tight md:text-4xl">
+            Code &amp; whiteboard playground
+          </h1>
           <p className="max-w-3xl text-lg text-gray-700">
             Some interview questions open a code editor or a whiteboard. Try them here first. Your
             work is saved on this device as you go, so you can reload or switch questions without

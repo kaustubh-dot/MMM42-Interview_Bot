@@ -22,7 +22,7 @@ export type JsonValue =
   | { [key: string]: JsonValue };
 
 export interface LlmRequest {
-  task: "plan" | "grade" | "evaluate" | "audit";
+  task: "plan" | "grade" | "evaluate" | "audit" | "practice"; // practice: C's DSA practice (flagged for A)
   system: string;
   input: JsonValue;
   mockOutput: JsonValue;

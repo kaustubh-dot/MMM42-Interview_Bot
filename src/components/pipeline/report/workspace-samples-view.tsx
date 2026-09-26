@@ -22,7 +22,7 @@ export function WorkspaceSamplesView({ examples }: { examples: WorkspaceExample[
             Only the spoken explanation is scored.
           </p>
           <div className="flex flex-wrap gap-3">
-            <NbLinkButton href="/practice" variant="primary" size="sm">
+            <NbLinkButton href="/practice/playground" variant="primary" size="sm">
               Try the workspace yourself
             </NbLinkButton>
             <NbLinkButton href="/report/sample" size="sm">

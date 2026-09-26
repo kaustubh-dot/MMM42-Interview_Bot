@@ -57,8 +57,8 @@ const TRY = [
   },
   {
     href: "/practice",
-    title: "Practice workspace",
-    body: "Try the code editor and whiteboard used in technical questions.",
+    title: "Coding practice",
+    body: "Pick a language and a topic like Binary Search. An AI tutor gives hints and step-by-step help.",
     tone: "nb-bg-2",
   },
   {

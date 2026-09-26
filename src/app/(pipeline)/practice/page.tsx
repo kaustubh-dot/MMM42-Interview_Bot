@@ -1,5 +1,5 @@
-import { PracticeWorkspace } from "@/components/pipeline/practice-workspace";
+import { PracticeApp } from "@/components/pipeline/practice/practice-app";
 
 export default function PracticePage() {
-  return <PracticeWorkspace />;
+  return <PracticeApp />;
 }
