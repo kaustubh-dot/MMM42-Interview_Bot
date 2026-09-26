@@ -12,7 +12,7 @@
 
 ## Scope and working rules
 
-- A1 foundation is implemented on `feat/interview-engine`; its publication/merge is the first handoff. A2/A3 and B/C/D tasks remain unstarted in this checkout. Existing assets include the FoloUp shell, golden fixture and reference algorithms.
+- A1 PR #1, A2 PR #4 (`383068c`), and B PR #3 are merged. A3's plan/turn/report flow is implemented on `feat/interview-engine`; see [A3 handoff](../../handoffs/a3-plan-report.md). B's modules are integrated; C's browser integration and D's durable service remain pending in this checkout.
 - A/B/C start now. D's arrival is unknown; use the arrival checklist below rather than blocking the first three teammates.
 - Provisionally allow six hours of build time and one protected rehearsal hour. Record actual names, deadline and D's arrival in the kickoff discussion before assigning calendar times.
 - Keep the selection rule, shared 0–3 rubric and integrity thresholds in `CLAUDE.md` unchanged.
@@ -172,12 +172,14 @@ Use `{ error: { code: string; message: string } }` for errors. Invalid input is 
 
 **Files:** new `select-next.ts`, `engine.ts`, pipeline start/turn/session routes.
 
-- [ ] Port the fixture selection rule into a pure function, preserving its exact precedence and constants.
-- [ ] Implement opening, candidate submission, grade application, next question selection and completion. Validate filled `term`/`quote` against the candidate text; use a safe template fallback if absent.
-- [ ] Select code/whiteboard only on the technical `scenarioTwist` rung using the agreed workspace field and legacy code-snippet fallback.
-- [ ] Implement artifact shape/size validation, server-derived `typedAnswer`, stable IDs and request deduplication. Reject mismatched workspace submissions; accept an explicit empty artifact when a candidate clears it.
-- [ ] Use a clearly labeled mock in-memory store until D's service is available. C's fixture replay stays usable independently; an in-memory session is not advertised as durable.
-- [ ] Wire B's `gradeAnswer` and expose the agreed routes. Connect D's persistence service in the same handlers at integration.
+- [x] Port the fixture selection rule into a pure function, preserving its exact precedence and constants.
+- [x] Implement opening, candidate submission, grade application, next question selection and completion. Validate filled `term`/`quote` against the candidate text; use a safe template fallback if absent.
+- [x] Select code/whiteboard only on the technical `scenarioTwist` rung using the agreed workspace field and legacy code-snippet fallback.
+- [x] Implement artifact shape/size validation, server-derived `typedAnswer`, stable IDs and request deduplication. Reject mismatched workspace submissions; accept an explicit empty artifact when a candidate clears it.
+- [x] Use a clearly labeled mock in-memory store until D's service is available. C's fixture replay stays usable independently; an in-memory session is not advertised as durable.
+- [x] Expose the agreed start/turn/session routes with isolated fixture-backed B/D adapters; integration instructions are in the A2 handoff.
+- [x] Connect B's `gradeAnswer` for planned attempts in A3. Preserve the labeled A2 fixture entry.
+- [ ] Connect D's durable persistence when its documented exports are available.
 
 **Acceptance:** golden reason sequence matches the reference, including strong/weak budget precedence, recovery from fundamental and max-question termination; the same retried submission does not append another turn or decision; a stale submit cannot overwrite a newer answer.
 
@@ -185,11 +187,14 @@ Use `{ error: { code: string; message: string } }` for errors. Invalid input is 
 
 **Files:** new `plan.ts`, plan/report routes; reuse `src/actions/parse-pdf.ts`.
 
-- [ ] Parse resume PDF and pasted/uploaded JD; return useful errors for empty or unreadable input.
-- [ ] Generate ranked claims, full ladders and appropriate technical workspaces. Verify resume/JD excerpts against the source text, calculate ranking in code, and reject generic openings.
-- [ ] A code workspace must have code/language/hidden issue. A whiteboard workspace must have a concrete system-design prompt; do not require a coding submission for that question.
-- [ ] Connect B's evaluation, validator, audit and fusion into report generation; connect D's report storage. Reuse an existing report on retry to avoid unnecessary repeated auditor calls.
-- [ ] Mark claims never reached as unassessed in the report data/UI mapping. Publish a live plan → turn → report handoff for C.
+- [x] Parse resume PDF and pasted/uploaded JD; return useful errors for empty or unreadable input.
+- [x] Generate ranked claims, full ladders and appropriate technical workspaces. Verify resume/JD excerpts against the source text, calculate ranking in code, and reject generic openings.
+- [x] A code workspace must have code/language/hidden issue. A whiteboard workspace must have a concrete system-design prompt; do not require a coding submission for that question.
+- [x] Connect B's evaluation, validator, audit and fusion; reuse a cached report on retries.
+- [ ] Connect D's report storage (service unavailable; labeled memory adapter in use).
+- [x] Publish unassessed claim UI mapping and plan → turn → report handoff for C. Gemini calls are wired; only the mock HTTP path has been exercised.
+- [ ] Coordinate actual browser TTS-completion timing with B/C before enabling latency scoring.
+- [ ] Check one real C Excalidraw scene through submission, D persistence, and reload.
 
 **Acceptance:** a new resume/JD reaches a question naming a concrete claim; full server plans persist but hidden issues never reach browser responses; report generation retains only supported scores and invokes one auditor pass per new evaluation.
 
