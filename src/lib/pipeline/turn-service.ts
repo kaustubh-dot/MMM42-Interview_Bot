@@ -3,11 +3,14 @@ import "server-only";
 import { goldenReport } from "../../fixtures/golden-interview";
 import type { AnswerArtifact, IntegrityEvent } from "../../types/pipeline";
 import type { StartRequest, SubmitTurnRequest, TurnReply } from "../../types/pipeline-api";
+import { redactIdentityText } from "../prompts/pipeline/blind";
 import { toClientRecord } from "./client-projection";
 import { type GradeAnswer, advanceInterview, createOpeningSession } from "./engine";
 import { PipelineError } from "./errors";
+import { gradeAnswer } from "./grade";
 import { mockGradeAnswer } from "./mock-grader";
 import { type SessionStore, mockSessionStore } from "./mock-session-store";
+import { planIdentities } from "./scoring-context";
 
 const processState = globalThis as typeof globalThis & {
   mmm42InterviewLocks?: Map<string, Promise<void>>;
@@ -15,7 +18,10 @@ const processState = globalThis as typeof globalThis & {
 const locks = processState.mmm42InterviewLocks ?? new Map<string, Promise<void>>();
 processState.mmm42InterviewLocks = locks;
 
-async function withInterviewLock<T>(interviewId: string, action: () => Promise<T>): Promise<T> {
+export async function withInterviewLock<T>(
+  interviewId: string,
+  action: () => Promise<T>,
+): Promise<T> {
   const prior = locks.get(interviewId) ?? Promise.resolve();
   let release = () => {};
   const current = new Promise<void>((resolve) => {
@@ -37,7 +43,7 @@ function object(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function id(value: unknown, field: string): string {
+export function id(value: unknown, field: string): string {
   if (typeof value !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(value)) {
     throw new PipelineError("INVALID_INPUT", `${field} must be a nonempty safe identifier.`, 400);
   }
@@ -154,22 +160,14 @@ export async function startAttempt(
   store: SessionStore = mockSessionStore,
 ): Promise<TurnReply> {
   const request = startRequest(raw);
-  if (process.env.LLM_MODE !== "mock") {
-    throw new PipelineError("MOCK_ONLY", "A2's fixture start path requires LLM_MODE=mock.", 502);
-  }
-  if (
-    request.interviewId !== "golden-sample-001" &&
-    !/^mock-[A-Za-z0-9_-]{1,64}$/.test(request.interviewId)
-  ) {
-    throw new PipelineError(
-      "UNKNOWN_ATTEMPT",
-      "No plan exists for this attempt. Use a mock-* ID in mock mode.",
-      404,
-    );
-  }
   return withInterviewLock(request.interviewId, async () => {
     const existing = await store.loadSession(request.interviewId);
     if (existing) {
+      if (existing.record.turns.length === 0 && existing.lastRequestId === null) {
+        const session = createOpeningSession(existing.record.plan, request.requestId);
+        await store.saveSession(session, null);
+        return session.lastReply as TurnReply;
+      }
       if (
         existing.record.decisions.length === 1 &&
         existing.lastRequestId === request.requestId &&
@@ -178,6 +176,23 @@ export async function startAttempt(
         return existing.lastReply;
       }
       throw new PipelineError("ALREADY_STARTED", "This attempt has already started.", 409);
+    }
+    if (process.env.LLM_MODE !== "mock") {
+      throw new PipelineError(
+        "UNKNOWN_ATTEMPT",
+        "Generate a plan before starting this attempt.",
+        404,
+      );
+    }
+    if (
+      request.interviewId !== "golden-sample-001" &&
+      !/^mock-[A-Za-z0-9_-]{1,64}$/.test(request.interviewId)
+    ) {
+      throw new PipelineError(
+        "UNKNOWN_ATTEMPT",
+        "No plan exists for this attempt. Use a mock-* ID in mock mode.",
+        404,
+      );
     }
     const plan = structuredClone(goldenReport.record.plan);
     plan.interviewId = request.interviewId;
@@ -200,7 +215,7 @@ export async function startAttempt(
 export async function submitCandidateTurn(
   raw: unknown,
   store: SessionStore = mockSessionStore,
-  grader: GradeAnswer = mockGradeAnswer,
+  grader?: GradeAnswer,
 ): Promise<TurnReply> {
   const request = submitRequest(raw);
   return withInterviewLock(request.interviewId, async () => {
@@ -208,10 +223,30 @@ export async function submitCandidateTurn(
     if (!current) {
       throw new PipelineError("UNKNOWN_ATTEMPT", "Interview attempt not found.", 404);
     }
+    if (current.record.turns.length === 0) {
+      throw new PipelineError(
+        "NOT_STARTED",
+        "Start this attempt before submitting an answer.",
+        409,
+      );
+    }
     if (current.lastRequestId === request.requestId && current.record.decisions.length === 1) {
       throw new PipelineError("REQUEST_ID_REUSED", "Use a new request ID for the answer.", 409);
     }
-    const { session, reply } = await advanceInterview(current, request, grader);
+    const identities = planIdentities(request.interviewId);
+    // Keep A2's explicitly labeled demo path separate. Planned interviews use B's real adapter,
+    // whose mock mode accepts only its documented golden inputs.
+    const selectedGrader =
+      grader ??
+      (identities === null
+        ? mockGradeAnswer
+        : async (input) =>
+            gradeAnswer({
+              ...input,
+              questionText: redactIdentityText(input.questionText, identities),
+              answerText: redactIdentityText(input.answerText, identities),
+            }));
+    const { session, reply } = await advanceInterview(current, request, selectedGrader);
     if (session !== current) {
       await store.saveSession(session, current.lastRequestId);
     }

@@ -1,5 +1,6 @@
 import "server-only";
 
+import type { InterviewReport } from "../../types/pipeline";
 import type { SavedSession } from "../../types/pipeline-api";
 import { PipelineError } from "./errors";
 
@@ -11,8 +12,23 @@ export interface SessionStore {
   saveSession(session: SavedSession, expectedLastRequestId: string | null): Promise<void>;
 }
 
-export class MockSessionStore implements SessionStore {
+export interface ReportStore extends SessionStore {
+  saveReport(interviewId: string, report: InterviewReport): Promise<void>;
+  loadReport(interviewId: string): Promise<InterviewReport | null>;
+}
+
+export class MockSessionStore implements ReportStore {
   private readonly sessions = new Map<string, SavedSession>();
+  private readonly reports = new Map<string, InterviewReport>();
+
+  async saveReport(interviewId: string, report: InterviewReport): Promise<void> {
+    this.reports.set(interviewId, structuredClone(report));
+  }
+
+  async loadReport(interviewId: string): Promise<InterviewReport | null> {
+    const report = this.reports.get(interviewId);
+    return report ? structuredClone(report) : null;
+  }
 
   async createSession(session: SavedSession): Promise<void> {
     const id = session.record.plan.interviewId;

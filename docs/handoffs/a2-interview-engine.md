@@ -1,7 +1,8 @@
 # A2 interview engine handoff
 
-Branch: `feat/interview-engine`. Base: A1 merge `97838f2`. A2 is a focused PR;
-do not merge it from the implementation chat. A3 plan/report generation is not included.
+Branch: `feat/interview-engine`. Base: A1 merge `97838f2`. A2 merged as PR #4
+on explicit user authorization (`383068c`). This document describes its original
+mock flow; [A3 handoff](a3-plan-report.md) covers subsequent B integration and plan/report APIs.
 
 ## Endpoints and mock entry
 
@@ -180,8 +181,8 @@ by install scripts were reverted to the initially clean copy.
 
 ## Next integration gates
 
-A2 review found no blocker for the labeled mock flow. PR #4 stays unmerged until
-explicit merge authorization; A3 remains on hold.
+A2 review found no blocker for the labeled mock flow. PR #4 is now merged;
+A3 proceeds under the user's authorization and requires its own unmerged PR.
 
 - [ ] A/B/C coordinate actual browser TTS-completion timing before enabling
   latency-based integrity scoring.
