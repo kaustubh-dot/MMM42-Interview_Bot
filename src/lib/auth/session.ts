@@ -6,6 +6,7 @@ export type Role = "candidate" | "recruiter";
 
 export const ROLE_COOKIE = "mmm42_role";
 export const SESSION_COOKIE = "mmm42_session";
+export const NAME_COOKIE = "mmm42_name";
 export const SESSION_MAX_AGE = 60 * 60 * 12; // 12 hours
 
 /** Dev-only fallback so the demo works before ADMIN_PASSCODE is set. Never used in production. */

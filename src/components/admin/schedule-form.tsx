@@ -93,7 +93,12 @@ export function ScheduleForm({ initialJobId }: { initialJobId?: string }) {
       let kind: CandidateKind;
       if (source === "resume" && resume) {
         // A3's plan route reads the resume against this job's description and stores the plan.
-        const plan = await createPlan({ resume, jdText: job.jdText });
+        const plan = await createPlan({
+          resume,
+          jdText: job.jdText,
+          candidateName: name.trim(),
+          candidateEmail: email.trim() || undefined,
+        });
         interviewId = plan.interviewId;
         kind = "live";
       } else {

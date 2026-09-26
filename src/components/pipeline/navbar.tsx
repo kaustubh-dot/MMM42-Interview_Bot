@@ -21,7 +21,10 @@ async function signOut() {
 }
 
 /** `role` comes from the server layout; only recruiters see the Recruiters tab. */
-export function AppNavbar({ role = null }: { role?: Role | null }) {
+export function AppNavbar({
+  role = null,
+  name = null,
+}: { role?: Role | null; name?: string | null }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const links = role === "recruiter" ? [...LINKS, RECRUITER_LINK] : LINKS;
@@ -31,7 +34,7 @@ export function AppNavbar({ role = null }: { role?: Role | null }) {
       onClick={signOut}
       className="rounded-lg px-3 py-2 text-sm font-medium hover:bg-white/70"
     >
-      Sign out ({role})
+      Sign out{name ? ` (${name})` : role === "recruiter" ? " (recruiter)" : ""}
     </button>
   ) : (
     <Link href="/login" className="rounded-lg px-3 py-2 font-medium hover:bg-white/70">
@@ -68,9 +71,15 @@ export function AppNavbar({ role = null }: { role?: Role | null }) {
             </li>
           ))}
           <li className="ml-3">
-            <NbLinkButton href="/interview" variant="primary" size="sm">
-              Start interview
-            </NbLinkButton>
+            {role === "recruiter" ? (
+              <NbLinkButton href="/admin/schedule" variant="primary" size="sm">
+                Schedule interview
+              </NbLinkButton>
+            ) : (
+              <NbLinkButton href="/interview" variant="primary" size="sm">
+                Start interview
+              </NbLinkButton>
+            )}
           </li>
           <li>{account}</li>
         </ul>
