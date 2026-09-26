@@ -57,8 +57,8 @@ const TRY = [
   },
   {
     href: "/practice",
-    title: "Coding practice",
-    body: "Pick a language and a topic like Binary Search. An AI tutor gives hints and step-by-step help.",
+    title: "Practice",
+    body: "Coding, system design and SQL questions from open-source sets, with an AI tutor for hints and step-by-step help.",
     tone: "nb-bg-2",
   },
   {

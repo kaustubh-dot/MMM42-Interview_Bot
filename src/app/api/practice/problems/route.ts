@@ -1,7 +1,7 @@
 import { handleJson } from "@/lib/practice/route-helpers";
-import { createProblemSet, problemSetRequestSchema } from "@/lib/practice/service";
+import { createSet, setRequestSchema } from "@/lib/practice/service";
 
-// DSA practice (C, flagged for A's review): builds a problem set. Nothing is scored or stored.
+// Practice (C, flagged for A's review): a coding or SQL set from the open-source datasets.
 export async function POST(request: Request) {
-  return handleJson(request, problemSetRequestSchema, createProblemSet);
+  return handleJson(request, setRequestSchema, async (body) => createSet(body));
 }

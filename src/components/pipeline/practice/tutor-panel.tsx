@@ -1,7 +1,7 @@
 "use client";
 
 import type { PracticeLanguage } from "@/lib/practice/catalog";
-import type { HelpKind, HelpMessage, HelpReply, PracticeProblem } from "@/lib/practice/types";
+import type { HelpKind, HelpMessage, HelpReply, Track } from "@/lib/practice/types";
 import { Loader2, Send } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { NbButton } from "../ui";
@@ -18,15 +18,43 @@ export interface Thread {
 
 export const EMPTY_THREAD: Thread = { items: [], hintsGiven: 0 };
 
-const DEFAULT_FOLLOW_UPS = [
-  "Why does this approach work?",
-  "What should I keep track of?",
-  "How do I start coding it?",
-];
+const DEFAULT_FOLLOW_UPS: Record<Track, string[]> = {
+  coding: [
+    "Why does this approach work?",
+    "What should I keep track of?",
+    "How do I start coding it?",
+  ],
+  sql: ["Which tables do I need?", "Why do I need a join here?", "How do I order the result?"],
+  design: ["What should I clarify first?", "Where is the bottleneck?", "How would this scale 10x?"],
+};
+
+const LABELS: Record<Track, { review: string; reviewAsk: string; checks: string; start: string }> =
+  {
+    coding: {
+      review: "Check my approach",
+      reviewAsk: "Check my approach against the test cases",
+      checks: "Test case check (reasoned, not run)",
+      start: "Try solving it first.",
+    },
+    sql: {
+      review: "Check my query",
+      reviewAsk: "Check my query against the expected result",
+      checks: "Query check (reasoned, not run)",
+      start: "Try writing the query first.",
+    },
+    design: {
+      review: "Review my design",
+      reviewAsk: "Review my design",
+      checks: "Design checklist",
+      start: "Sketch your design and jot notes first.",
+    },
+  };
 
 const VERDICT_STYLE = {
   "likely passes": "bg-emerald-100",
+  covered: "bg-emerald-100",
   "likely fails": "nb-bg-salmon",
+  missing: "nb-bg-salmon",
   unclear: "bg-[#f3f3f3]",
 } as const;
 
@@ -44,15 +72,18 @@ function asHistory(items: ThreadItem[]): HelpMessage[] {
 }
 
 interface Props {
-  problem: PracticeProblem;
-  language: PracticeLanguage;
-  getCode: () => string;
+  track: Track;
+  itemId: string;
+  language?: PracticeLanguage;
+  /** The student's current work, read at the moment help is requested. */
+  getAnswer: () => string;
   thread: Thread;
   onThread: (t: Thread) => void;
 }
 
-/** AI tutor: understand the question, hints, a step-by-step solution, and a code review. */
-export function TutorPanel({ problem, language, getCode, thread, onThread }: Props) {
+/** AI tutor: understand the question, hints, a step-by-step solution, and a review. */
+export function TutorPanel({ track, itemId, language, getAnswer, thread, onThread }: Props) {
+  const labels = LABELS[track];
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<{ message: string; retry: () => void } | null>(null);
   const [question, setQuestion] = useState("");
@@ -79,10 +110,11 @@ export function TutorPanel({ problem, language, getCode, thread, onThread }: Pro
     setLoading(label);
     try {
       const reply = await fetchHelp({
+        track,
+        itemId,
         kind,
-        problem,
-        language,
-        code: getCode(),
+        ...(language ? { language } : {}),
+        answer: getAnswer(),
         ...(opts.hintLevel ? { hintLevel: opts.hintLevel } : {}),
         ...(opts.question ? { question: opts.question } : {}),
         history: asHistory(before.items),
@@ -110,7 +142,7 @@ export function TutorPanel({ problem, language, getCode, thread, onThread }: Pro
   const followUps =
     lastAssistant?.role === "assistant" && lastAssistant.reply.followUps?.length
       ? lastAssistant.reply.followUps
-      : DEFAULT_FOLLOW_UPS;
+      : DEFAULT_FOLLOW_UPS[track];
 
   return (
     <section className="nb-card flex flex-col" aria-label="AI tutor">
@@ -166,12 +198,8 @@ export function TutorPanel({ problem, language, getCode, thread, onThread }: Pro
                   Walk me through it
                 </NbButton>
               )}
-              <NbButton
-                size="sm"
-                disabled={busy}
-                onClick={() => ask("review", "Check my approach against the test cases")}
-              >
-                Check my approach
+              <NbButton size="sm" disabled={busy} onClick={() => ask("review", labels.reviewAsk)}>
+                {labels.review}
               </NbButton>
             </div>
             {confirmSolve && (
@@ -189,8 +217,8 @@ export function TutorPanel({ problem, language, getCode, thread, onThread }: Pro
       >
         {thread.items.length === 0 && !busy && (
           <p className="text-sm text-gray-600">
-            Try solving it first. When you want help, pick a button above or ask a question below
-            (why, what, how to proceed…).
+            {labels.start} When you want help, pick a button above or ask a question below (why,
+            what, how to proceed…).
           </p>
         )}
         {thread.items.map((item, i) =>
@@ -203,7 +231,7 @@ export function TutorPanel({ problem, language, getCode, thread, onThread }: Pro
             </div>
           ) : (
             // biome-ignore lint/suspicious/noArrayIndexKey: thread items are append-only
-            <AssistantReply key={i} reply={item.reply} />
+            <AssistantReply key={i} reply={item.reply} checksTitle={labels.checks} />
           ),
         )}
         {busy && (
@@ -276,7 +304,7 @@ export function TutorPanel({ problem, language, getCode, thread, onThread }: Pro
   );
 }
 
-function AssistantReply({ reply }: { reply: HelpReply }) {
+function AssistantReply({ reply, checksTitle }: { reply: HelpReply; checksTitle: string }) {
   return (
     <div className="space-y-3 rounded-2xl rounded-tl-none border-2 border-[#111] bg-white p-4">
       <div className="flex flex-wrap items-center gap-2">
@@ -299,15 +327,15 @@ function AssistantReply({ reply }: { reply: HelpReply }) {
           {s.code && <pre className="nb-code overflow-x-auto p-3 text-xs">{s.code}</pre>}
         </div>
       ))}
-      {reply.testReview && reply.testReview.length > 0 && (
+      {reply.checks && reply.checks.length > 0 && (
         <div className="space-y-2">
-          <p className="text-sm font-bold">Test case check (reasoned, not run)</p>
+          <p className="text-sm font-bold">{checksTitle}</p>
           <ul className="space-y-2">
-            {reply.testReview.map((r, i) => (
+            {reply.checks.map((r, i) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: static per reply
               <li key={i} className="rounded-xl border-2 border-[#111]/20 p-2 text-sm">
                 <div className="flex flex-wrap items-center gap-2">
-                  <code className="font-mono text-xs">{r.input}</code>
+                  <code className="font-mono text-xs">{r.label}</code>
                   <span className={`nb-pill ml-auto text-[11px] ${VERDICT_STYLE[r.verdict]}`}>
                     {r.verdict}
                   </span>

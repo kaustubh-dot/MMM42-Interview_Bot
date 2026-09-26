@@ -1,82 +1,54 @@
 import "server-only";
 
-// DSA practice service: problem sets, topic patterns and tutoring help. Every model call goes
-// through A's `generateJson` adapter (task "practice"), and every reply is validated with zod
-// before use. When the AI isn't available the bundled problem set is used and labeled as such;
-// it is never presented as AI output. Practice is not part of the scored interview.
+// Practice service. Problem sets come from the open-source datasets (no AI needed). The AI tutor
+// goes through A's `generateJson` adapter (task "practice"), is grounded with the dataset's
+// reference solution, and every reply is validated with zod. When the AI is unavailable the
+// tutor falls back to notes built from the dataset, always labeled "built-in".
 
 import { LlmError, generateJson } from "@/lib/llm";
 import type { JsonValue } from "@/types/pipeline-api";
 import { z } from "zod";
-import { BANK, type BankEntry, bankToProblem, findBankEntry } from "./bank";
+import { LANGUAGE_IDS, MAX_SET_SIZE, TOPIC_HINTS, languageLabel } from "./catalog";
 import {
-  LANGUAGE_IDS,
-  MAX_PROBLEMS_PER_SET,
-  PRACTICE_TOPICS,
-  type PracticeLanguage,
-  type PracticePattern,
-  languageLabel,
-} from "./catalog";
-import type {
-  HelpReply,
-  HelpRequest,
-  PatternsReply,
-  PracticeProblem,
-  ProblemSetReply,
-  ProblemSetRequest,
-} from "./types";
+  CODING,
+  type CodingRecord,
+  type DesignRecord,
+  SQL,
+  type SqlRecord,
+  findCoding,
+  findDesign,
+  findSql,
+  toClientCoding,
+  toClientSql,
+  topicOfProblem,
+} from "./data";
+import type { CheckItem, HelpReply, HelpRequest, SetReply, SetRequest } from "./types";
 
 // ── Request validation ─────────────────────────────────────────────────
-const short = (max: number) => z.string().trim().min(1).max(max);
+const avoid = z.array(z.string().max(120)).max(60).optional();
 
-export const problemSetRequestSchema = z.object({
-  language: z.enum(LANGUAGE_IDS),
-  mode: z.enum(["random", "topic"]),
-  topic: short(80).optional(),
-  selections: z
-    .array(
-      z.object({ pattern: short(120), count: z.union([z.literal(1), z.literal(2), z.literal(3)]) }),
-    )
-    .max(8)
-    .optional(),
-  avoidTitles: z.array(z.string().max(120)).max(40).optional(),
-});
-
-export const patternsRequestSchema = z.object({ topic: short(80) });
-
-const exampleSchema = z.object({
-  input: z.string().min(1).max(2000),
-  output: z.string().min(1).max(2000),
-  explanation: z.string().max(2000).optional(),
-});
-const testCaseSchema = z.object({
-  input: z.string().min(1).max(2000),
-  expectedOutput: z.string().min(1).max(2000),
-  note: z.string().max(300).optional(),
-});
-const problemSchema = z.object({
-  id: z.string().min(1).max(120),
-  title: z.string().min(1).max(160),
-  difficulty: z.enum(["Easy", "Medium", "Hard"]),
-  topic: z.string().min(1).max(80),
-  pattern: z.string().min(1).max(120),
-  knownAs: z.string().min(1).max(200),
-  statement: z.string().min(1).max(5000),
-  inputFormat: z.string().min(1).max(1000),
-  outputFormat: z.string().min(1).max(1000),
-  constraints: z.array(z.string().min(1).max(300)).min(1).max(12),
-  examples: z.array(exampleSchema).min(1).max(5),
-  testCases: z.array(testCaseSchema).min(1).max(10),
-  expectations: z.array(z.string().min(1).max(300)).min(1).max(10),
-  starterCode: z.string().max(20_000),
-  starterLanguage: z.enum(LANGUAGE_IDS),
-});
+export const setRequestSchema = z.discriminatedUnion("track", [
+  z.object({
+    track: z.literal("coding"),
+    topic: z.string().min(1).max(60),
+    difficulty: z.enum(["Any", "Easy", "Medium", "Hard"]),
+    count: z.number().int().min(1).max(MAX_SET_SIZE),
+    avoidIds: avoid,
+  }),
+  z.object({
+    track: z.literal("sql"),
+    category: z.string().min(1).max(60),
+    count: z.number().int().min(1).max(MAX_SET_SIZE),
+    avoidIds: avoid,
+  }),
+]);
 
 export const helpRequestSchema = z.object({
+  track: z.enum(["coding", "sql", "design"]),
+  itemId: z.string().min(1).max(160),
   kind: z.enum(["understand", "hint", "solve", "review", "ask"]),
-  problem: problemSchema,
-  language: z.enum(LANGUAGE_IDS),
-  code: z.string().max(100 * 1024),
+  answer: z.string().max(100 * 1024),
+  language: z.enum(LANGUAGE_IDS).optional(),
   hintLevel: z.number().int().min(1).max(3).optional(),
   question: z.string().trim().max(2000).optional(),
   history: z
@@ -85,44 +57,27 @@ export const helpRequestSchema = z.object({
     .optional(),
 });
 
-// ── Model reply validation ─────────────────────────────────────────────
-const modelProblemSchema = problemSchema.omit({ id: true, starterLanguage: true });
-const modelProblemSetSchema = z.object({
-  problems: z.array(modelProblemSchema).min(1).max(MAX_PROBLEMS_PER_SET),
-});
-const modelPatternsSchema = z.object({
-  patterns: z
-    .array(
-      z.object({
-        name: z.string().min(1).max(120),
-        description: z.string().min(1).max(400),
-        classicExample: z.string().min(1).max(160),
-      }),
-    )
-    .min(2)
-    .max(8),
-});
 const modelHelpSchema = z.object({
   title: z.string().min(1).max(200),
   sections: z
     .array(
       z.object({
         heading: z.string().min(1).max(200),
-        body: z.string().min(1).max(6000),
+        body: z.string().min(1).max(8000),
         code: z.string().max(20_000).optional(),
       }),
     )
     .min(1)
-    .max(12),
-  testReview: z
+    .max(14),
+  checks: z
     .array(
       z.object({
-        input: z.string().min(1).max(2000),
-        verdict: z.enum(["likely passes", "likely fails", "unclear"]),
-        reason: z.string().min(1).max(1000),
+        label: z.string().min(1).max(2000),
+        verdict: z.enum(["likely passes", "likely fails", "unclear", "covered", "missing"]),
+        reason: z.string().min(1).max(1500),
       }),
     )
-    .max(12)
+    .max(20)
     .optional(),
   followUps: z.array(z.string().min(1).max(200)).max(4).optional(),
 });
@@ -138,11 +93,6 @@ export class PracticeError extends Error {
 }
 
 const isMockMode = () => process.env.LLM_MODE === "mock";
-const BUILT_IN_NOTICE_MOCK = "Demo mode: showing the built-in problem set (LLM_MODE=mock).";
-const BUILT_IN_NOTICE_UNCONFIGURED =
-  "The AI isn't set up on this server, so you're seeing the built-in problem set. Add LLM_MODE=gemini and GEMINI_API_KEY to switch on AI-generated problems.";
-const BUILT_IN_NOTICE_FAILED =
-  "The AI didn't respond properly, so you're seeing the built-in problem set. Try again for AI problems.";
 
 function shuffle<T>(items: T[]): T[] {
   const a = [...items];
@@ -153,338 +103,545 @@ function shuffle<T>(items: T[]): T[] {
   return a;
 }
 
-const slug = (s: string) =>
-  s
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 60);
+const toJson = (value: unknown): JsonValue => JSON.parse(JSON.stringify(value)) as JsonValue;
 
-function toJson(value: unknown): JsonValue {
-  return JSON.parse(JSON.stringify(value)) as JsonValue;
+/** Prefer items the student hasn't seen recently, but never return fewer than available. */
+function pickFresh<T extends { id: string }>(
+  pool: T[],
+  count: number,
+  avoidIds: string[] = [],
+): T[] {
+  const seen = new Set(avoidIds);
+  const fresh = shuffle(pool.filter((p) => !seen.has(p.id)));
+  const stale = shuffle(pool.filter((p) => seen.has(p.id)));
+  return [...fresh, ...stale].slice(0, count);
 }
 
-/** Calls the model; on configuration/upstream/shape failures returns null with a reason. */
-async function callModel<T>(
-  system: string,
-  input: JsonValue,
-  mockOutput: JsonValue,
-  schema: z.ZodType<T>,
-): Promise<{ ok: true; value: T } | { ok: false; reason: "unconfigured" | "failed" }> {
-  let raw: unknown;
-  try {
-    raw = await generateJson({ task: "practice", system, input, mockOutput });
-  } catch (err) {
-    if (err instanceof LlmError && err.code === "LLM_CONFIGURATION") {
-      return { ok: false, reason: "unconfigured" };
-    }
-    return { ok: false, reason: "failed" };
-  }
-  const parsed = schema.safeParse(raw);
-  return parsed.success ? { ok: true, value: parsed.data } : { ok: false, reason: "failed" };
-}
+const codingPool = (ids: string[]) =>
+  ids.map((id) => findCoding(id)).filter((p): p is CodingRecord => !!p);
 
 // ── Problem sets ───────────────────────────────────────────────────────
-const PROBLEM_SHAPE = `Return JSON: {"problems": [ { "title", "difficulty" ("Easy"|"Medium"|"Hard"), "topic", "pattern", "knownAs" (where it is commonly known from, e.g. "Classic interview problem (LeetCode 11)" or "Asked at Amazon and Google"), "statement" (clear, self-contained, 2-5 sentences), "inputFormat", "outputFormat", "constraints" (array of strings with realistic bounds), "examples" (2 items: {"input","output","explanation"}), "testCases" (3-5 items: {"input","expectedOutput","note"}; include edge cases such as empty input, single element, duplicates, negatives, large values), "expectations" (3-5 bullet strings: what the interviewer expects, e.g. target time/space complexity, explain approach, handle edge cases), "starterCode" (a function or class stub only, NO solution, in the requested language) } ]}.
-Every expectedOutput must be correct for its input. Use plain text (no markdown). Never include the solution.`;
-
-function pickBankForRandom(avoid: string[]): BankEntry[] {
-  const avoidSet = new Set(avoid.map((t) => t.toLowerCase()));
-  const fresh = BANK.filter((e) => !avoidSet.has(e.title.toLowerCase()));
-  const pool = shuffle(fresh.length >= 3 ? fresh : BANK);
-  // Prefer three different topics.
-  const out: BankEntry[] = [];
-  for (const e of pool) {
-    if (out.length < 3 && !out.some((o) => o.topic === e.topic)) {
-      out.push(e);
+export function createSet(req: SetRequest): SetReply {
+  if (req.track === "sql") {
+    const cat = SQL.categories.find((c) => c.id === req.category);
+    if (!cat) {
+      throw new PracticeError(400, "unknown_category", "Pick one of the listed SQL categories.");
     }
-  }
-  return out.length === 3 ? out : pool.slice(0, 3);
-}
-
-function pickBankForTopic(
-  topic: string,
-  selections: { pattern: string; count: number }[],
-): BankEntry[] {
-  const inTopic = BANK.filter((e) => e.topic.toLowerCase() === topic.toLowerCase());
-  const out: BankEntry[] = [];
-  for (const sel of selections) {
-    const matches = shuffle(
-      inTopic.filter((e) => e.pattern.toLowerCase() === sel.pattern.toLowerCase()),
+    const pool = cat.exerciseIds.map((id) => findSql(id)).filter((e): e is SqlRecord => !!e);
+    // Keep the dataset's teaching order within the set.
+    const picked = pickFresh(pool, req.count, req.avoidIds).sort(
+      (a, b) => pool.indexOf(a) - pool.indexOf(b),
     );
-    out.push(...matches.slice(0, sel.count).filter((m) => !out.includes(m)));
+    return {
+      track: "sql",
+      exercises: picked.map(toClientSql),
+      ...(picked.length < req.count
+        ? { notice: `This category has ${picked.length} exercises, so you get all of them.` }
+        : {}),
+    };
   }
-  if (out.length === 0) {
-    out.push(...shuffle(inTopic).slice(0, 3));
-  }
-  return out.slice(0, MAX_PROBLEMS_PER_SET);
-}
 
-function withIds(
-  problems: z.infer<typeof modelProblemSchema>[],
-  language: PracticeLanguage,
-): PracticeProblem[] {
-  const stamp = Date.now().toString(36);
-  return problems.map((p, i) => ({
-    ...p,
-    id: `ai-${slug(p.title)}-${stamp}-${i}`,
-    starterLanguage: language,
-  }));
-}
-
-export async function createProblemSet(req: ProblemSetRequest): Promise<ProblemSetReply> {
-  const language = req.language;
-  let bankPick: BankEntry[];
-  let requested = 3;
-  let system: string;
-  let input: JsonValue;
-
-  if (req.mode === "random") {
-    bankPick = pickBankForRandom(req.avoidTitles ?? []);
-    const topics = shuffle(PRACTICE_TOPICS)
-      .slice(0, 3)
-      .map((t) => t.name);
-    const difficulties = shuffle(["Easy", "Medium", "Medium", "Hard"]).slice(0, 3);
-    system = `You are an interview coach. Pick 3 different, well-known coding interview problems that are popular worldwide (the kind asked at top tech companies and found on LeetCode, HackerRank or GeeksforGeeks). Use one problem per requested topic, at the requested difficulty. Frame each one like a real interview question. ${PROBLEM_SHAPE}`;
-    input = toJson({
-      language: languageLabel(language),
-      topics,
-      difficulties,
-      avoidTitles: req.avoidTitles ?? [],
+  if (req.topic === "surprise") {
+    const topics = shuffle(CODING.topics).slice(0, 3);
+    const difficulties = shuffle(["Easy", "Medium", "Hard"] as const);
+    const problems = topics.map((t, i) => {
+      const all = codingPool(t.problemIds);
+      const want = req.difficulty === "Any" ? difficulties[i] : req.difficulty;
+      const pool = all.filter((p) => p.difficulty === want);
+      const pick = pickFresh(pool.length ? pool : all, 1, req.avoidIds)[0];
+      return { ...toClientCoding(pick), topic: t.name };
     });
-  } else {
-    const topic = req.topic ?? "Arrays & Hashing";
-    const selections = req.selections?.length
-      ? req.selections
-      : [{ pattern: "any", count: 1 as const }];
-    const total = selections.reduce((n, s) => n + s.count, 0);
-    if (total > MAX_PROBLEMS_PER_SET) {
-      throw new PracticeError(
-        400,
-        "too_many",
-        `Pick at most ${MAX_PROBLEMS_PER_SET} problems in one set.`,
-      );
-    }
-    bankPick = pickBankForTopic(topic, selections);
-    requested = total;
-    system = `You are an interview coach. For the topic and each selected pattern, create exactly the requested number of distinct interview problems that genuinely require that pattern, based on popular, well-known interview problems. Order them easier to harder within each pattern. ${PROBLEM_SHAPE}`;
-    input = toJson({
-      language: languageLabel(language),
-      topic,
-      patterns: selections,
-      avoidTitles: req.avoidTitles ?? [],
-    });
+    return { track: "coding", problems };
   }
 
-  const mockProblems = bankPick.map((e) => bankToProblem(e, language));
-  const result = await callModel(
-    system,
-    input,
-    toJson({ problems: mockProblems }),
-    modelProblemSetSchema,
+  const topic = CODING.topics.find((t) => t.id === req.topic);
+  if (!topic) {
+    throw new PracticeError(400, "unknown_topic", "Pick one of the listed topics.");
+  }
+  const pool = codingPool(topic.problemIds).filter(
+    (p) => req.difficulty === "Any" || p.difficulty === req.difficulty,
   );
-  if (result.ok && !isMockMode()) {
-    return { problems: withIds(result.value.problems, language), source: "ai" };
-  }
-  if (mockProblems.length === 0) {
-    throw new PracticeError(
-      503,
-      "ai_unavailable",
-      "The built-in set has no problems for this topic, and the AI isn't available right now. Try a listed topic.",
-    );
-  }
-  const notice = isMockMode()
-    ? BUILT_IN_NOTICE_MOCK
-    : !result.ok && result.reason === "unconfigured"
-      ? BUILT_IN_NOTICE_UNCONFIGURED
-      : BUILT_IN_NOTICE_FAILED;
-  const shortfall =
-    mockProblems.length < requested
-      ? ` The built-in set has ${mockProblems.length} of the ${requested} problems you asked for.`
-      : "";
-  return { problems: mockProblems, source: "built-in", notice: notice + shortfall };
-}
-
-// ── Patterns ───────────────────────────────────────────────────────────
-export async function getPatterns(topicName: string): Promise<PatternsReply> {
-  const known = PRACTICE_TOPICS.find(
-    (t) => t.name.toLowerCase() === topicName.toLowerCase() || t.id === topicName.toLowerCase(),
+  const order = { Easy: 0, Medium: 1, Hard: 2 };
+  const picked = pickFresh(pool, req.count, req.avoidIds).sort(
+    (a, b) => order[a.difficulty] - order[b.difficulty],
   );
-  if (known) {
-    return { topic: known.name, patterns: known.patterns, source: "catalog" };
-  }
-  const result = await callModel(
-    'You are a DSA tutor. List the main problem-solving patterns for the given topic that students should practice for coding interviews. Return JSON: {"patterns": [{"name", "description" (one simple sentence), "classicExample" (a well-known problem name)}]} with 3-6 patterns. Plain text only.',
-    toJson({ topic: topicName }),
-    toJson({
-      patterns: [
-        {
-          name: `${topicName} fundamentals`,
-          description: `Core ${topicName} problems.`,
-          classicExample: "A classic problem",
-        },
-        {
-          name: `Advanced ${topicName}`,
-          description: `Harder ${topicName} variations.`,
-          classicExample: "A harder variation",
-        },
-      ],
-    }),
-    modelPatternsSchema,
-  );
-  if (!result.ok) {
-    throw new PracticeError(
-      503,
-      "ai_unavailable",
-      result.reason === "unconfigured"
-        ? "Custom topics need the AI, which isn't set up on this server. Pick one of the listed topics."
-        : "The AI couldn't list patterns right now. Try again, or pick one of the listed topics.",
-    );
-  }
-  const patterns: PracticePattern[] = result.value.patterns.map((pt) => ({
-    ...pt,
-    id: slug(pt.name),
-  }));
+  const level = req.difficulty === "Any" ? "" : `${req.difficulty} `;
   return {
-    topic: topicName,
-    patterns,
-    source: isMockMode() ? "built-in" : "ai",
-    ...(isMockMode() ? { notice: "Demo mode: placeholder patterns (LLM_MODE=mock)." } : {}),
+    track: "coding",
+    problems: picked.map((p) => ({ ...toClientCoding(p), topic: topic.name })),
+    ...(picked.length < req.count
+      ? {
+          notice: `There are ${picked.length} ${level}problems in ${topic.name}, so you get all of them.`,
+        }
+      : {}),
   };
 }
 
-// ── Tutoring help ──────────────────────────────────────────────────────
-const TUTOR_BASE = `You are a friendly, patient DSA tutor for a student practicing for coding interviews. Explain in simple words, short paragraphs, no markdown symbols. Return JSON: {"title", "sections": [{"heading", "body", "code" (optional)}], "followUps" (optional: up to 3 short questions the student might ask next)}.`;
+// ── Tutor prompts ──────────────────────────────────────────────────────
+const TUTOR_BASE = `You are a friendly, patient interview-prep tutor for a student. Explain in simple words and short paragraphs, with no markdown symbols. You are given the exercise and a REFERENCE SOLUTION for grounding: never reveal or paraphrase the reference solution unless the task is "solve". Return JSON: {"title", "sections": [{"heading", "body", "code" (optional)}], "followUps" (optional: up to 3 short questions the student might ask next)}.`;
 
-const HELP_SYSTEM: Record<HelpRequest["kind"], string> = {
-  understand: `${TUTOR_BASE} Help the student understand the problem only: restate it in plain words, walk through the first example by hand, list the edge cases to watch for, and say which pattern family might help. Do NOT give the algorithm or code.`,
-  hint: `${TUTOR_BASE} Give exactly one hint at the requested hintLevel: 1 = a gentle nudge about what to notice, 2 = the key idea or data structure, 3 = the algorithm outline in words. Never give code or the full solution. Build on hints already given in history.`,
-  solve: `${TUTOR_BASE} Teach the full solution step by step. Include sections for: why the naive approach is slow, the key insight (why), what data structure/state to keep (what), how to proceed step by step (how), a dry run on the first example, complexity, and common mistakes. Put the complete, correct solution code in the student's language in one section's "code" field.`,
-  review: `${TUTOR_BASE} Review the student's code WITHOUT running it. Reason carefully about correctness against each provided test case and add "testReview": [{"input", "verdict" ("likely passes"|"likely fails"|"unclear"), "reason"}]. Point out bugs, edge cases and complexity. Be clear that this is reasoning, not execution. Don't rewrite their whole solution; suggest targeted fixes.`,
-  ask: `${TUTOR_BASE} Answer the student's question about this problem (why, what, how to proceed). Use the conversation history. If they haven't asked for the full solution, prefer guiding questions and hints over giving it away.`,
+const TRACK_CONTEXT: Record<HelpRequest["track"], string> = {
+  coding:
+    "The exercise is a coding (data structures and algorithms) problem. The student's work is code in the language given.",
+  sql: "The exercise is a PostgreSQL query exercise on the given schema (schema cd: members, facilities, bookings). The student's work is a SQL query.",
+  design:
+    "The exercise is a system design interview question. The student's work is their written notes plus the text labels from their whiteboard diagram.",
 };
 
-function builtInHelp(req: HelpRequest, entry: BankEntry | undefined): HelpReply {
-  const source = "built-in" as const;
-  const notice = isMockMode()
-    ? "Demo mode: built-in tutor notes (LLM_MODE=mock)."
-    : "The AI tutor isn't available, so these are the built-in notes for this problem.";
-  if (!entry) {
-    throw new PracticeError(
-      503,
-      "ai_unavailable",
-      "The AI tutor isn't available right now. Try again in a moment.",
-    );
+const KIND_TASK: Record<HelpRequest["kind"], string> = {
+  understand:
+    'Task "understand": help the student understand the exercise only. Restate it in plain words, walk through the example or expected output, and list what to watch out for (edge cases, requirements, scope). Do NOT give the approach, query or design.',
+  hint: 'Task "hint": give exactly one hint at the requested hintLevel: 1 = a gentle nudge about what to notice, 2 = the key idea (data structure, SQL clause, or architecture component), 3 = an outline in words. No code, no full query, no full design. Build on earlier hints in the history.',
+  solve:
+    'Task "solve": teach the full solution step by step, using the reference solution. Cover: why the naive approach falls short, the key insight (why), what to keep track of (what), how to proceed step by step (how), a dry run on the example, complexity or trade-offs, and common mistakes. For coding, put complete correct code in the student\'s language in one section\'s "code". For SQL, put the full query in "code".',
+  review:
+    'Task "review": review the student\'s work WITHOUT running anything. Add "checks": for coding, one item per test case ({"label": input, "verdict": "likely passes"|"likely fails"|"unclear", "reason"}); for SQL, check the result columns, filters, joins, grouping and ordering against the expected output ({"verdict": "likely passes"|"likely fails"|"unclear"}); for design, one item per important component or requirement ({"verdict": "covered"|"missing"}). Point out bugs and gaps with targeted fixes. Say clearly that this is reasoning, not execution.',
+  ask: 'Task "ask": answer the student\'s question (why, what, how to proceed) using the history. If they have not asked for the full solution, guide with questions and hints instead of giving it away.',
+};
+
+function itemForModel(req: HelpRequest) {
+  if (req.track === "coding") {
+    const p = findCoding(req.itemId);
+    if (!p) {
+      return null;
+    }
+    const { referenceSolution, referenceExplanation, pythonStarter: _s, ...exercise } = p;
+    return {
+      exercise,
+      referenceSolution: `${referenceSolution}\n\n${referenceExplanation}`.slice(0, 6000),
+    };
   }
-  const ex1 = entry.examples[0];
+  if (req.track === "sql") {
+    const e = findSql(req.itemId);
+    if (!e) {
+      return null;
+    }
+    const { referenceSql, referenceExplanation, hint, ...exercise } = e;
+    return {
+      exercise: {
+        ...exercise,
+        schema: SQL.schema.tables.map((t) => ({ table: t.name, columns: t.columns })),
+        foreignKeys: SQL.schema.foreignKeys,
+      },
+      referenceSolution: `${referenceSql}\n\n${referenceExplanation}\n\nHint: ${hint}`.slice(
+        0,
+        6000,
+      ),
+    };
+  }
+  const q = findDesign(req.itemId);
+  if (!q) {
+    return null;
+  }
+  const { walkthrough, keyTerms, ...exercise } = q;
+  return {
+    exercise,
+    referenceSolution: walkthrough
+      ? walkthrough
+          .map((s) => `${s.heading}: ${s.body}`)
+          .join("\n\n")
+          .slice(0, 7000)
+      : "No reference walkthrough: use standard system design practice (requirements, estimates, API, data model, high-level design, scaling, bottlenecks).",
+    keyComponents: keyTerms ?? [],
+  };
+}
+
+// ── Built-in notes (AI unavailable) ────────────────────────────────────
+const firstSentences = (s: string, n: number) =>
+  (s.match(/[^.!?]+[.!?]+/g) ?? [s]).slice(0, n).join(" ").trim();
+
+const SQL_FEATURES: [RegExp, string][] = [
+  [/\bjoin\b/i, "JOIN"],
+  [/\bleft (outer )?join\b/i, "LEFT OUTER JOIN"],
+  [/\bgroup by\b/i, "GROUP BY"],
+  [/\bhaving\b/i, "HAVING"],
+  [/\bover\s*\(/i, "a window function (OVER)"],
+  [/\bwith recursive\b/i, "WITH RECURSIVE"],
+  [/\bcase\b/i, "CASE"],
+  [/\(\s*select\b/i, "a subquery"],
+  [/\bunion\b/i, "UNION"],
+  [/\bdistinct\b/i, "DISTINCT"],
+  [/\border by\b/i, "ORDER BY"],
+  [/\bgenerate_series\b/i, "generate_series"],
+  [/\b(extract|date_trunc|date_part)\b/i, "a date function (EXTRACT / DATE_TRUNC)"],
+  [/\binsert\b/i, "INSERT"],
+  [/\bupdate\b/i, "UPDATE"],
+  [/\bdelete\b/i, "DELETE"],
+];
+const sqlFeatures = (sql: string) =>
+  SQL_FEATURES.filter(([re]) => re.test(sql)).map(([, name]) => name);
+
+const GENERIC_DESIGN_STEPS = [
+  {
+    heading: "1. Clarify requirements",
+    body: "List the core use cases, what is out of scope, and targets for scale, latency and availability.",
+  },
+  {
+    heading: "2. Estimate",
+    body: "Rough numbers: users, requests per second (reads vs writes), storage per year, bandwidth.",
+  },
+  {
+    heading: "3. API and data model",
+    body: "Define the main endpoints and the tables or documents they read and write.",
+  },
+  {
+    heading: "4. High-level design",
+    body: "Client → load balancer → stateless web/API servers → database, plus cache, object store, queue or CDN where they help.",
+  },
+  {
+    heading: "5. Scale and bottlenecks",
+    body: "Find the hot path. Add caching, replication, sharding and async workers; discuss trade-offs and failure modes.",
+  },
+];
+
+function builtInCoding(req: HelpRequest, base: Pick<HelpReply, "source" | "notice">): HelpReply {
+  const p = findCoding(req.itemId);
+  if (!p) {
+    throw new PracticeError(404, "unknown_item", "That problem no longer exists. Start a new set.");
+  }
+  const level = Math.min(3, Math.max(1, req.hintLevel ?? 1));
+  const hints = TOPIC_HINTS[topicOfProblem(p.id)?.id ?? ""] ?? [
+    "Start from the brute force and find the repeated work.",
+    "Pick a data structure that removes the repeated work.",
+  ];
+  const ex = p.examples[0];
   switch (req.kind) {
     case "understand":
       return {
-        source,
-        notice,
-        title: `Understanding "${entry.title}"`,
+        ...base,
+        title: `Understanding "${p.title}"`,
         sections: [
-          { heading: "In plain words", body: entry.statement },
+          { heading: "The task", body: p.statement },
           {
-            heading: "Walk through an example",
-            body: `Input: ${ex1.input}\nOutput: ${ex1.output}${ex1.explanation ? `\nWhy: ${ex1.explanation}` : ""}`,
+            heading: "Walk through example 1",
+            body: `Input: ${ex.input}\nOutput: ${ex.output}${ex.explanation ? `\nWhy: ${ex.explanation}` : ""}`,
           },
+          { heading: "Watch the constraints", body: p.constraints.join("\n") },
           {
-            heading: "Edge cases to watch",
-            body: entry.testCases
-              .map((tc) => `${tc.input}${tc.note ? ` (${tc.note})` : ""}`)
-              .join("\n"),
-          },
-          {
-            heading: "Which pattern helps?",
-            body: `This is a "${entry.pattern}" problem (${entry.topic}).`,
+            heading: "Edge cases from the tests",
+            body: p.testCases.map((t) => t.input).join("\n"),
           },
         ],
         followUps: ["Give me a hint", "What's the brute force?"],
       };
-    case "hint": {
-      const level = Math.min(3, Math.max(1, req.hintLevel ?? 1));
+    case "hint":
       return {
-        source,
-        notice,
+        ...base,
         title: `Hint ${level} of 3`,
-        sections: [{ heading: `Hint ${level}`, body: entry.hints[level - 1] }],
-      };
-    }
-    case "solve":
-      return {
-        source,
-        notice,
-        title: `Step-by-step: ${entry.title}`,
         sections: [
-          ...entry.steps,
           {
-            heading:
-              req.language === "python" ? "Solution" : "Solution (built-in notes are in Python)",
-            body: `Complexity: ${entry.complexity}.`,
-            code: entry.solutionPython,
+            heading: `Hint ${level}`,
+            body:
+              level < 3 ? hints[level - 1] : firstSentences(p.referenceExplanation, 2) || hints[1],
           },
         ],
       };
+    case "solve": {
+      const other = req.language && req.language !== "python";
+      return {
+        ...base,
+        title: `Step by step: ${p.title}`,
+        sections: [
+          {
+            heading: "Reference explanation",
+            body: p.referenceExplanation || "Read the code below line by line.",
+          },
+          {
+            heading: "Reference solution (Python, from the dataset)",
+            body: other
+              ? `The built-in solution is in Python. The AI tutor writes it in ${languageLabel(req.language ?? "python")} when it's switched on.`
+              : "Compare it with your approach, line by line.",
+            code: p.referenceSolution,
+          },
+        ],
+      };
+    }
     case "review":
       return {
-        source,
-        notice,
+        ...base,
         title: "Check it yourself",
         sections: [
           {
-            heading: "The AI reviewer isn't available",
-            body: "Trace your code by hand on each test case below. For each one, write down what every variable holds after each loop step and compare the final value with the expected output.",
+            heading: "Trace by hand",
+            body: "The AI reviewer isn't available. Trace your code on each test case below, tracking every variable after each step, and compare with the expected output.",
           },
         ],
-        testReview: entry.testCases.map((tc) => ({
-          input: tc.input,
+        checks: p.testCases.map((t) => ({
+          label: t.input,
           verdict: "unclear" as const,
-          reason: `Expected: ${tc.expectedOutput}. Trace your code to confirm.`,
+          reason: `Expected ${t.expectedOutput}. Trace your code to confirm.`,
         })),
       };
     default:
       return {
-        source,
-        notice,
+        ...base,
         title: "Built-in notes",
         sections: [
           {
             heading: "Free-form questions need the AI",
-            body: "Meanwhile, here is how to think about it:",
+            body: `Meanwhile: ${hints[0]} ${hints[1]}`,
           },
-          ...entry.steps.slice(0, 2),
         ],
       };
   }
 }
 
+function builtInSql(req: HelpRequest, base: Pick<HelpReply, "source" | "notice">): HelpReply {
+  const e = findSql(req.itemId);
+  if (!e) {
+    throw new PracticeError(
+      404,
+      "unknown_item",
+      "That exercise no longer exists. Start a new set.",
+    );
+  }
+  const level = Math.min(3, Math.max(1, req.hintLevel ?? 1));
+  const tables = SQL.schema.tables.filter((t) => e.referenceSql.toLowerCase().includes(t.name));
+  const features = sqlFeatures(e.referenceSql);
+  switch (req.kind) {
+    case "understand":
+      return {
+        ...base,
+        title: `Understanding "${e.title}"`,
+        sections: [
+          { heading: "The task", body: e.question },
+          {
+            heading: "Tables you'll need",
+            body:
+              tables
+                .map((t) => `${t.name}: ${t.columns.map((c) => c.name).join(", ")}`)
+                .join("\n") || "See the schema panel.",
+          },
+          {
+            heading: "What the result looks like",
+            body: `${e.writeable ? `This changes data; it's checked by looking at ${e.checksTable} afterwards.\n` : ""}Columns: ${e.expected.columns.join(", ")}\nRows: ${e.expected.totalRows}${e.orderMatters ? "\nThe row order matters." : ""}`,
+          },
+        ],
+      };
+    case "hint": {
+      const order = features.filter((f) =>
+        ["JOIN", "LEFT OUTER JOIN", "GROUP BY", "HAVING", "ORDER BY"].includes(f),
+      );
+      const body =
+        level === 1
+          ? e.hint
+          : level === 2
+            ? `You'll likely need: ${features.join(", ") || "a SELECT with a WHERE clause"}.`
+            : `Tables involved: ${tables.map((t) => t.name).join(", ")}. Build it in this order: FROM → ${order.join(" → ") || "WHERE → SELECT"}.`;
+      return {
+        ...base,
+        title: `Hint ${level} of 3`,
+        sections: [{ heading: `Hint ${level}`, body }],
+      };
+    }
+    case "solve":
+      return {
+        ...base,
+        title: `Step by step: ${e.title}`,
+        sections: [
+          { heading: "Explanation", body: e.referenceExplanation },
+          { heading: "Reference query", body: "From PostgreSQL Exercises.", code: e.referenceSql },
+        ],
+      };
+    case "review": {
+      const answer = req.answer.toLowerCase();
+      const checks: CheckItem[] = [
+        ...e.expected.columns.map((col) => {
+          const has = answer.includes(col.toLowerCase());
+          return {
+            label: `Result column "${col}"`,
+            verdict: has ? ("likely passes" as const) : ("unclear" as const),
+            reason: has
+              ? "Your query mentions this column or alias."
+              : "Couldn't find this column or alias in your query. Check the SELECT list and aliases.",
+          };
+        }),
+        ...features.map((f) => {
+          const re = SQL_FEATURES.find(([, name]) => name === f)?.[0];
+          const has = re ? re.test(req.answer) : false;
+          return {
+            label: f,
+            verdict: has ? ("likely passes" as const) : ("unclear" as const),
+            reason: has
+              ? "Your query uses this."
+              : "The reference answer uses this. Check whether your approach needs it.",
+          };
+        }),
+      ];
+      return {
+        ...base,
+        title: "Quick check (built-in, not run)",
+        sections: [
+          {
+            heading: "How this check works",
+            body: "Without the AI, this only compares your query's text with the expected columns and the clauses the reference answer uses. It does not run your SQL.",
+          },
+        ],
+        checks,
+      };
+    }
+    default:
+      return {
+        ...base,
+        title: "Built-in notes",
+        sections: [
+          {
+            heading: "Free-form questions need the AI",
+            body: `Meanwhile, the exercise hint: ${e.hint}`,
+          },
+        ],
+      };
+  }
+}
+
+function builtInDesign(req: HelpRequest, base: Pick<HelpReply, "source" | "notice">): HelpReply {
+  const q = findDesign(req.itemId) as DesignRecord | undefined;
+  if (!q) {
+    throw new PracticeError(404, "unknown_item", "That design question no longer exists.");
+  }
+  const level = Math.min(3, Math.max(1, req.hintLevel ?? 1));
+  switch (req.kind) {
+    case "understand":
+      return {
+        ...base,
+        title: `Scoping "${q.title}"`,
+        sections: q.guided
+          ? [
+              { heading: "Use cases to support", body: (q.useCases ?? []).join("\n") },
+              {
+                heading: "Out of scope",
+                body: (q.outOfScope ?? []).join("\n") || "Ask the interviewer.",
+              },
+              {
+                heading: "Assumptions",
+                body: (q.assumptions ?? []).join("\n") || "Ask the interviewer.",
+              },
+            ]
+          : [
+              {
+                heading: "Questions to ask first",
+                body: "Who are the users and what are the 3 most important actions? How many users and requests per second? Read-heavy or write-heavy? What latency and availability are expected? What's out of scope?",
+              },
+            ],
+      };
+    case "hint": {
+      const body =
+        level === 1
+          ? "Start with the simplest design that serves the main use cases: client → web server → API → database. Draw it before optimizing."
+          : level === 2
+            ? q.calculations?.length
+              ? `Size the problem:\n${q.calculations.slice(0, 8).join("\n")}`
+              : "Estimate reads vs writes per second and storage per year. The bigger side drives caching, replication and sharding choices."
+            : q.walkthrough?.[0]
+              ? firstSentences(q.walkthrough[0].body, 3)
+              : "Add a cache in front of the hot reads, move slow work to a queue with workers, and put static content on a CDN.";
+      return {
+        ...base,
+        title: `Hint ${level} of 3`,
+        sections: [{ heading: `Hint ${level}`, body }],
+      };
+    }
+    case "solve":
+      return {
+        ...base,
+        title: q.walkthrough?.length ? `Walkthrough: ${q.title}` : "A framework to follow",
+        sections: q.walkthrough?.length ? q.walkthrough : GENERIC_DESIGN_STEPS,
+      };
+    case "review": {
+      const text = req.answer.toLowerCase();
+      const terms = q.keyTerms?.length
+        ? q.keyTerms
+        : ["Load balancer", "Cache", "Database", "Queue", "CDN", "Replication", "Sharding"];
+      return {
+        ...base,
+        title: "Design checklist (built-in)",
+        sections: [
+          {
+            heading: "How this check works",
+            body: "Without the AI, this only looks for key components from the reference design in your notes and whiteboard labels.",
+          },
+        ],
+        checks: terms.map((t) => {
+          const words = t
+            .toLowerCase()
+            .split(/\s+/)
+            .filter((w) => w.length > 2);
+          const covered = words.some((w) => text.includes(w));
+          return {
+            label: t,
+            verdict: covered ? ("covered" as const) : ("missing" as const),
+            reason: covered
+              ? "Mentioned in your notes or diagram."
+              : "Not found. Would it help your design?",
+          };
+        }),
+      };
+    }
+    default:
+      return { ...base, title: "Built-in notes", sections: GENERIC_DESIGN_STEPS.slice(0, 3) };
+  }
+}
+
+function builtInHelp(req: HelpRequest): HelpReply {
+  const base = {
+    source: "built-in" as const,
+    notice: isMockMode()
+      ? "Demo mode: built-in notes from the open-source dataset (LLM_MODE=mock)."
+      : "The AI tutor isn't available, so these are built-in notes from the open-source dataset.",
+  };
+  if (req.track === "coding") {
+    return builtInCoding(req, base);
+  }
+  if (req.track === "sql") {
+    return builtInSql(req, base);
+  }
+  return builtInDesign(req, base);
+}
+
+// ── Tutor entry point ──────────────────────────────────────────────────
 export async function getHelp(req: HelpRequest): Promise<HelpReply> {
   if (req.kind === "ask" && !req.question) {
     throw new PracticeError(400, "missing_question", "Type a question first.");
   }
-  const entry = findBankEntry(req.problem.id);
-  const { starterCode: _s, ...problemForModel } = req.problem;
-  const input = toJson({
-    problem: problemForModel,
-    language: languageLabel(req.language),
-    studentCode: req.code,
-    hintLevel: req.hintLevel ?? null,
-    question: req.question ?? null,
-    history: req.history ?? [],
-  });
-  // Mock output: the built-in notes (only available for built-in problems).
-  let mock: JsonValue = toJson({
-    title: "Tutor",
-    sections: [{ heading: "Demo", body: "Demo mode tutor reply." }],
-  });
-  if (entry) {
-    const { source: _src, notice: _n, ...rest } = builtInHelp(req, entry);
-    mock = toJson(rest);
+  const item = itemForModel(req);
+  if (!item) {
+    throw new PracticeError(
+      404,
+      "unknown_item",
+      "That exercise no longer exists. Start a new set.",
+    );
   }
-  const result = await callModel(HELP_SYSTEM[req.kind], input, mock, modelHelpSchema);
-  if (result.ok && !isMockMode()) {
-    return { ...result.value, source: "ai" };
+  const fallback = builtInHelp(req);
+  const { source: _s, notice: _n, ...mockOutput } = fallback;
+  let raw: unknown;
+  try {
+    raw = await generateJson({
+      task: "practice",
+      system: `${TUTOR_BASE}\n${TRACK_CONTEXT[req.track]}\n${KIND_TASK[req.kind]}`,
+      input: toJson({
+        ...item,
+        studentWork: req.answer,
+        studentLanguage:
+          req.track === "coding"
+            ? languageLabel(req.language ?? "python")
+            : req.track === "sql"
+              ? "PostgreSQL"
+              : "notes",
+        hintLevel: req.hintLevel ?? null,
+        question: req.question ?? null,
+        history: req.history ?? [],
+      }),
+      mockOutput: toJson(mockOutput),
+    });
+  } catch (err) {
+    if (err instanceof LlmError) {
+      return fallback;
+    }
+    throw err;
   }
-  return builtInHelp(req, entry);
+  if (isMockMode()) {
+    return fallback;
+  }
+  const parsed = modelHelpSchema.safeParse(raw);
+  return parsed.success ? { ...parsed.data, source: "ai" } : fallback;
 }

@@ -9,7 +9,7 @@ import { NbLinkButton } from "./ui";
 const LINKS = [
   { href: "/", label: "Home" },
   { href: "/#how-it-works", label: "How it works" },
-  { href: "/practice", label: "Coding practice" },
+  { href: "/practice", label: "Practice" },
   { href: "/report/sample", label: "Sample report" },
 ];
 
@@ -91,7 +91,7 @@ export function AppFooter() {
             Start interview
           </Link>
           <Link className="nb-link" href="/practice">
-            Coding practice
+            Practice
           </Link>
           <Link className="nb-link" href="/practice/playground">
             Editor &amp; whiteboard playground

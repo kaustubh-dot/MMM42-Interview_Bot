@@ -1,12 +1,12 @@
-// Browser client for the DSA practice routes.
+// Browser client for the practice routes.
 
 import type {
   HelpReply,
   HelpRequest,
-  PatternsReply,
   PracticeErrorBody,
-  ProblemSetReply,
-  ProblemSetRequest,
+  SetReply,
+  SetRequest,
+  Track,
 } from "@/lib/practice/types";
 
 export class PracticeApiError extends Error {}
@@ -31,29 +31,44 @@ async function post<T>(url: string, body: unknown): Promise<T> {
   return data as T;
 }
 
-export const fetchProblemSet = (req: ProblemSetRequest) =>
-  post<ProblemSetReply>("/api/practice/problems", req);
-export const fetchPatterns = (topic: string) =>
-  post<PatternsReply>("/api/practice/patterns", { topic });
+export const fetchSet = (req: SetRequest) => post<SetReply>("/api/practice/problems", req);
 export const fetchHelp = (req: HelpRequest) => post<HelpReply>("/api/practice/help", req);
 
-const SEEN_KEY = "mmm42:practice:seen-titles";
+const seenKey = (track: Track) => `mmm42:practice:seen:${track}`;
 
-/** Titles shown recently, so "surprise me" avoids repeats. */
-export function recentTitles(): string[] {
+/** Recently practiced IDs, so new sets prefer fresh questions. */
+export function recentIds(track: Track): string[] {
   try {
-    const raw = window.localStorage.getItem(SEEN_KEY);
-    return raw ? (JSON.parse(raw) as string[]).slice(0, 30) : [];
+    const raw = window.localStorage.getItem(seenKey(track));
+    return raw ? (JSON.parse(raw) as string[]).slice(0, 60) : [];
   } catch {
     return [];
   }
 }
 
-export function rememberTitles(titles: string[]) {
+export function rememberIds(track: Track, ids: string[]) {
   try {
-    const merged = [...titles, ...recentTitles().filter((t) => !titles.includes(t))].slice(0, 30);
-    window.localStorage.setItem(SEEN_KEY, JSON.stringify(merged));
+    const merged = [...ids, ...recentIds(track).filter((id) => !ids.includes(id))].slice(0, 60);
+    window.localStorage.setItem(seenKey(track), JSON.stringify(merged));
   } catch {
     // Not critical: repeats are just more likely.
+  }
+}
+
+/** Small localStorage helpers for per-item drafts (code, SQL, design notes). */
+export function loadText(key: string): string | null {
+  try {
+    return window.localStorage.getItem(`mmm42:practice:${key}`);
+  } catch {
+    return null;
+  }
+}
+
+export function saveText(key: string, value: string): boolean {
+  try {
+    window.localStorage.setItem(`mmm42:practice:${key}`, value);
+    return true;
+  } catch {
+    return false;
   }
 }

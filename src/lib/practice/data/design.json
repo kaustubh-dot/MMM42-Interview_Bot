@@ -1,0 +1,860 @@
+{
+  "source": {
+    "name": "The System Design Primer",
+    "url": "https://github.com/donnemartin/system-design-primer",
+    "commit": "ae9bbd7b02d90b9866215de185217d33f39ab733",
+    "license": "CC BY 4.0"
+  },
+  "questions": [
+    {
+      "id": "pastebin",
+      "title": "Design Pastebin.com (or Bit.ly)",
+      "guided": true,
+      "useCases": [
+        "User enters a block of text and gets a randomly generated link",
+        "  Expiration",
+        "    Default setting does not expire",
+        "    Can optionally set a timed expiration",
+        "User enters a paste's url and views the contents",
+        "User is anonymous",
+        "Service tracks analytics of pages",
+        "  Monthly visit stats",
+        "Service deletes expired pastes",
+        "Service has high availability"
+      ],
+      "outOfScope": [
+        "User registers for an account",
+        "  User verifies email",
+        "User logs into a registered account",
+        "  User edits the document",
+        "User can set visibility",
+        "User can set the shortlink"
+      ],
+      "assumptions": [
+        "Traffic is not evenly distributed",
+        "Following a short link should be fast",
+        "Pastes are text only",
+        "Page view analytics do not need to be realtime",
+        "10 million users",
+        "10 million paste writes per month",
+        "100 million paste reads per month",
+        "10:1 read to write ratio"
+      ],
+      "calculations": [
+        "Size per paste",
+        "  1 KB content per paste",
+        "  shortlink - 7 bytes",
+        "  expiration_length_in_minutes - 4 bytes",
+        "  created_at - 5 bytes",
+        "  paste_path - 255 bytes",
+        "  total = ~1.27 KB",
+        "12.7 GB of new paste content per month",
+        "  1.27 KB per paste * 10 million pastes per month",
+        "  ~450 GB of new paste content in 3 years",
+        "  360 million shortlinks in 3 years",
+        "  Assume most are new pastes instead of updates to existing ones",
+        "4 paste writes per second on average",
+        "40 read requests per second on average",
+        "2.5 million seconds per month",
+        "1 request per second = 2.5 million requests per month",
+        "40 requests per second = 100 million requests per month",
+        "400 requests per second = 1 billion requests per month"
+      ],
+      "walkthrough": [
+        {
+          "heading": "High-level design",
+          "body": "Outline a high level design with all important components."
+        },
+        {
+          "heading": "Use case: User enters a block of text and gets a randomly generated link",
+          "body": "We could use a relational database as a large hash table, mapping the generated url to a file server and path containing the paste file.\n\nInstead of managing a file server, we could use a managed Object Store such as Amazon S3 or a NoSQL document store.\n\nAn alternative to a relational database acting as a large hash table, we could use a NoSQL key-value store.  We should discuss the tradeoffs between choosing SQL or NoSQL.  The following discussion uses the relational database approach.\n\n• The Client sends a create paste request to the Web Server, running as a reverse proxy\n• The Web Server forwards the request to the Write API server\n• The Write API server does the following:\n    • Generates a unique url\n        • Checks if the url is unique by looking at the SQL Database for a duplicate\n        • If the url is not unique, it generates another url\n        • If we supported a custom url, we could use the user-supplied (also check for a duplicate)\n    • Saves to the SQL Database pastes table\n    • Saves the paste data to the Object Store\n    • Returns the url\n\nClarify with your interviewer how much code you are expected to write.\n\nThe pastes table could have the following structure:\n\n```\nshortlink char(7) NOT NULL\nexpiration_length_in_minutes int NOT NULL\ncreated_at datetime NOT NULL\npaste_path varchar(255) NOT NULL\nPRIMARY KEY(shortlink)\n```\n\nSetting the primary key to be based on the shortlink column creates an index that the database uses to enforce uniqueness. We'll create an additional index on created_at to speed up lookups (log-time instead of scanning the entire table) and to keep the data in memory.  Reading 1 MB sequentially from memory takes about 250 microseconds, while reading from SSD takes 4x and from disk takes 80x longer.<sup><a href=https://github.com/donnemartin/system-design-primer#latency-numbers-every-programmer-should-know>1</a></sup>\n\nTo generate the unique url, we could:\n\n• Take the MD5 hash of the user's ip_address + timestamp\n    • MD5 is a widely used hashing function that produces a 128-bit hash value\n    • MD5 is uniformly distributed\n    • Alternatively, we could also take the MD5 hash of randomly-generated data\n• Base 62 encode the MD5 hash\n    • Base 62 encodes to [a-zA-Z0-9] which works well for urls, eliminating the need for escaping special characters\n    • There is only one hash result for the original input and Base 62 is deterministic (no randomness involved)\n    • Base 64 is another popular encoding but provides issues for urls because of the additional + and / characters\n    • The following Base 62 pseudocode runs in O(k) time where k is the number of digits = 7:\n\n```python\ndef base_encode(num, base=62):\n    digits = []\n    while num > 0\n      remainder = modulo(num, base)\n      digits.push(remainder)\n      num = divide(num, base)\n    digits = digits.reverse\n```\n\n• Take the first 7 characters of the output, which results in 62^7 possible values and should be sufficient to handle our constraint of 360 million shortlinks in 3 years:\n\n```python\nurl = base_encode(md5(ip_address+timestamp))[:URL_LENGTH]\n```\n\nWe'll use a public REST API:\n\n```\n$ curl -X POST --data '{ \"expiration_length_in_minutes\": \"60\", \\\n    \"paste_contents\": \"Hello World!\" }' https://pastebin.com/api/v1/paste\n```\n\nResponse:\n\n```\n{\n    \"shortlink\": \"foobar\"\n}\n```\n\nFor internal communications, we could use Remote Procedure Calls."
+        },
+        {
+          "heading": "Use case: User enters a paste's url and views the contents",
+          "body": "• The Client sends a get paste request to the Web Server\n• The Web Server forwards the request to the Read API server\n• The Read API server does the following:\n    • Checks the SQL Database for the generated url\n        • If the url is in the SQL Database, fetch the paste contents from the Object Store\n        • Else, return an error message for the user\n\nREST API:\n\n```\n$ curl https://pastebin.com/api/v1/paste?shortlink=foobar\n```\n\nResponse:\n\n```\n{\n    \"paste_contents\": \"Hello World\"\n    \"created_at\": \"YYYY-MM-DD HH:MM:SS\"\n    \"expiration_length_in_minutes\": \"60\"\n}\n```"
+        },
+        {
+          "heading": "Use case: Service tracks analytics of pages",
+          "body": "Since realtime analytics are not a requirement, we could simply MapReduce the Web Server logs to generate hit counts.\n\nClarify with your interviewer how much code you are expected to write.\n\n```python\nclass HitCounts(MRJob):\n\n    def extract_url(self, line):\n        \"\"\"Extract the generated url from the log line.\"\"\"\n        ...\n\n    def extract_year_month(self, line):\n        \"\"\"Return the year and month portions of the timestamp.\"\"\"\n        ...\n\n    def mapper(self, _, line):\n        \"\"\"Parse each log line, extract and transform relevant lines.\n\n        Emit key value pairs of the form:\n\n        (2016-01, url0), 1\n        (2016-01, url0), 1\n        (2016-01, url1), 1\n        \"\"\"\n        url = self.extract_url(line)\n        period = self.extract_year_month(line)\n        yield (period, url), 1\n\n    def reducer(self, key, values):\n        \"\"\"Sum values for each key.\n\n        (2016-01, url0), 2\n        (2016-01, url1), 1\n        \"\"\"\n        yield key, sum(values)\n```"
+        },
+        {
+          "heading": "Use case: Service deletes expired pastes",
+          "body": "To delete expired pastes, we could just scan the SQL Database for all entries whose expiration timestamp are older than the current timestamp.  All expired entries would then be deleted (or  marked as expired) from the table."
+        },
+        {
+          "heading": "Scaling the design",
+          "body": "Identify and address bottlenecks, given the constraints.\n\nImportant: Do not simply jump right into the final design from the initial design!\n\nState you would do this iteratively: 1) Benchmark/Load Test, 2) Profile for bottlenecks 3) address bottlenecks while evaluating alternatives and trade-offs, and 4) repeat.  See Design a system that scales to millions of users on AWS as a sample on how to iteratively scale the initial design.\n\nIt's important to discuss what bottlenecks you might encounter with the initial design and how you might address each of them.  For example, what issues are addressed by adding a Load Balancer with multiple Web Servers?  CDN?  Master-Slave Replicas?  What are the alternatives and Trade-Offs for each?\n\nWe'll introduce some components to complete the design and to address scalability issues.  Internal load balancers are not shown to reduce clutter.\n\n*To avoid repeating discussions*, refer to the following system design topics for main talking points, tradeoffs, and alternatives:\n\n• DNS\n• CDN\n• Load balancer\n• Horizontal scaling\n• Web server (reverse proxy)\n• API server (application layer)\n• Cache\n• Relational database management system (RDBMS)\n• SQL write master-slave failover\n• Master-slave replication\n• Consistency patterns\n• Availability patterns\n\nThe Analytics Database could use a data warehousing solution such as Amazon Redshift or Google BigQuery.\n\nAn Object Store such as Amazon S3 can comfortably handle the constraint of 12.7 GB of new content per month.\n\nTo address the 40 *average* read requests per second (higher at peak), traffic for popular content should be handled by the Memory Cache instead of the database.  The Memory Cache is also useful for handling the unevenly distributed traffic and traffic spikes.  The SQL Read Replicas should be able to handle the cache misses, as long as the replicas are not bogged down with replicating writes.\n\n4 *average* paste writes per second (with higher at peak) should be do-able for a single SQL Write Master-Slave.  Otherwise, we'll need to employ additional SQL scaling patterns:\n\n• Federation\n• Sharding\n• Denormalization\n• SQL Tuning\n\nWe should also consider moving some data to a NoSQL Database."
+        }
+      ],
+      "keyTerms": [
+        "Object Store",
+        "Client",
+        "Web Server",
+        "Write API",
+        "SQL Database",
+        "REST API",
+        "Read API",
+        "MapReduce",
+        "Profile",
+        "Load Balancer",
+        "Web Servers",
+        "CDN",
+        "Analytics Database",
+        "Memory Cache",
+        "SQL Read Replicas",
+        "NoSQL Database"
+      ]
+    },
+    {
+      "id": "twitter",
+      "title": "Design the Twitter timeline and search",
+      "guided": true,
+      "useCases": [
+        "User posts a tweet",
+        "  Service pushes tweets to followers, sending push notifications and emails",
+        "User views the user timeline (activity from the user)",
+        "User views the home timeline (activity from people the user is following)",
+        "User searches keywords",
+        "Service has high availability"
+      ],
+      "outOfScope": [
+        "Service pushes tweets to the Twitter Firehose and other streams",
+        "Service strips out tweets based on users' visibility settings",
+        "  Hide @reply if the user is not also following the person being replied to",
+        "  Respect 'hide retweets' setting",
+        "Analytics"
+      ],
+      "assumptions": [
+        "Traffic is not evenly distributed",
+        "Posting a tweet should be fast",
+        "  Fanning out a tweet to all of your followers should be fast, unless you have millions of followers",
+        "100 million active users",
+        "500 million tweets per day or 15 billion tweets per month",
+        "  Each tweet averages a fanout of 10 deliveries",
+        "  5 billion total tweets delivered on fanout per day",
+        "  150 billion tweets delivered on fanout per month",
+        "250 billion read requests per month",
+        "10 billion searches per month",
+        "Viewing the timeline should be fast",
+        "Twitter is more read heavy than write heavy",
+        "  Optimize for fast reads of tweets",
+        "Ingesting tweets is write heavy",
+        "Searching should be fast",
+        "Search is read-heavy"
+      ],
+      "calculations": [
+        "Size per tweet:",
+        "  tweet_id - 8 bytes",
+        "  user_id - 32 bytes",
+        "  text - 140 bytes",
+        "  media - 10 KB average",
+        "  Total: ~10 KB",
+        "150 TB of new tweet content per month",
+        "  10 KB per tweet * 500 million tweets per day * 30 days per month",
+        "  5.4 PB of new tweet content in 3 years",
+        "100 thousand read requests per second",
+        "  250 billion read requests per month * (400 requests per second / 1 billion requests per month)",
+        "6,000 tweets per second",
+        "  15 billion tweets per month * (400 requests per second / 1 billion requests per month)",
+        "60 thousand tweets delivered on fanout per second",
+        "  150 billion tweets delivered on fanout per month * (400 requests per second / 1 billion requests per month)",
+        "4,000 search requests per second",
+        "  10 billion searches per month * (400 requests per second / 1 billion requests per month)",
+        "2.5 million seconds per month",
+        "1 request per second = 2.5 million requests per month",
+        "40 requests per second = 100 million requests per month",
+        "400 requests per second = 1 billion requests per month"
+      ],
+      "walkthrough": [
+        {
+          "heading": "High-level design",
+          "body": "Outline a high level design with all important components."
+        },
+        {
+          "heading": "Use case: User posts a tweet",
+          "body": "We could store the user's own tweets to populate the user timeline (activity from the user) in a relational database.  We should discuss the use cases and tradeoffs between choosing SQL or NoSQL.\n\nDelivering tweets and building the home timeline (activity from people the user is following) is trickier.  Fanning out tweets to all followers (60 thousand tweets delivered on fanout per second) will overload a traditional relational database.  We'll probably want to choose a data store with fast writes such as a NoSQL database or Memory Cache.  Reading 1 MB sequentially from memory takes about 250 microseconds, while reading from SSD takes 4x and from disk takes 80x longer.<sup><a href=https://github.com/donnemartin/system-design-primer#latency-numbers-every-programmer-should-know>1</a></sup>\n\nWe could store media such as photos or videos on an Object Store.\n\n• The Client posts a tweet to the Web Server, running as a reverse proxy\n• The Web Server forwards the request to the Write API server\n• The Write API stores the tweet in the user's timeline on a SQL database\n• The Write API contacts the Fan Out Service, which does the following:\n    • Queries the User Graph Service to find the user's followers stored in the Memory Cache\n    • Stores the tweet in the *home timeline of the user's followers* in a Memory Cache\n        • O(n) operation:  1,000 followers = 1,000 lookups and inserts\n    • Stores the tweet in the Search Index Service to enable fast searching\n    • Stores media in the Object Store\n    • Uses the Notification Service to send out push notifications to followers:\n        • Uses a Queue (not pictured) to asynchronously send out notifications\n\nClarify with your interviewer how much code you are expected to write.\n\nIf our Memory Cache is Redis, we could use a native Redis list with the following structure:\n\n```\n           tweet n+2                   tweet n+1                   tweet n\n| 8 bytes   8 bytes  1 byte | 8 bytes   8 bytes  1 byte | 8 bytes   8 bytes  1 byte |\n| tweet_id  user_id  meta   | tweet_id  user_id  meta   | tweet_id  user_id  meta   |\n```\n\nThe new tweet would be placed in the Memory Cache, which populates the user's home timeline (activity from people the user is following).\n\nWe'll use a public REST API:\n\n```\n$ curl -X POST --data '{ \"user_id\": \"123\", \"auth_token\": \"ABC123\", \\\n    \"status\": \"hello world!\", \"media_ids\": \"ABC987\" }' \\\n    https://twitter.com/api/v1/tweet\n```\n\nResponse:\n\n```\n{\n    \"created_at\": \"Wed Sep 05 00:37:15 +0000 2012\",\n    \"status\": \"hello world!\",\n    \"tweet_id\": \"987\",\n    \"user_id\": \"123\",\n    ...\n}\n```\n\nFor internal communications, we could use Remote Procedure Calls."
+        },
+        {
+          "heading": "Use case: User views the home timeline",
+          "body": "• The Client posts a home timeline request to the Web Server\n• The Web Server forwards the request to the Read API server\n• The Read API server contacts the Timeline Service, which does the following:\n    • Gets the timeline data stored in the Memory Cache, containing tweet ids and user ids - O(1)\n    • Queries the Tweet Info Service with a multiget to obtain additional info about the tweet ids - O(n)\n    • Queries the User Info Service with a multiget to obtain additional info about the user ids - O(n)\n\nREST API:\n\n```\n$ curl https://twitter.com/api/v1/home_timeline?user_id=123\n```\n\nResponse:\n\n```\n{\n    \"user_id\": \"456\",\n    \"tweet_id\": \"123\",\n    \"status\": \"foo\"\n},\n{\n    \"user_id\": \"789\",\n    \"tweet_id\": \"456\",\n    \"status\": \"bar\"\n},\n{\n    \"user_id\": \"789\",\n    \"tweet_id\": \"579\",\n    \"status\": \"baz\"\n},\n```"
+        },
+        {
+          "heading": "Use case: User views the user timeline",
+          "body": "• The Client posts a user timeline request to the Web Server\n• The Web Server forwards the request to the Read API server\n• The Read API retrieves the user timeline from the SQL Database\n\nThe REST API would be similar to the home timeline, except all tweets would come from the user as opposed to the people the user is following."
+        },
+        {
+          "heading": "Use case: User searches keywords",
+          "body": "• The Client sends a search request to the Web Server\n• The Web Server forwards the request to the Search API server\n• The Search API contacts the Search Service, which does the following:\n    • Parses/tokenizes the input query, determining what needs to be searched\n        • Removes markup\n        • Breaks up the text into terms\n        • Fixes typos\n        • Normalizes capitalization\n        • Converts the query to use boolean operations\n    • Queries the Search Cluster (ie Lucene) for the results:\n        • Scatter gathers each server in the cluster to determine if there are any results for the query\n        • Merges, ranks, sorts, and returns the results\n\nREST API:\n\n```\n$ curl https://twitter.com/api/v1/search?query=hello+world\n```\n\nThe response would be similar to that of the home timeline, except for tweets matching the given query."
+        },
+        {
+          "heading": "Scaling the design",
+          "body": "Identify and address bottlenecks, given the constraints.\n\nImportant: Do not simply jump right into the final design from the initial design!\n\nState you would 1) Benchmark/Load Test, 2) Profile for bottlenecks 3) address bottlenecks while evaluating alternatives and trade-offs, and 4) repeat.  See Design a system that scales to millions of users on AWS as a sample on how to iteratively scale the initial design.\n\nIt's important to discuss what bottlenecks you might encounter with the initial design and how you might address each of them.  For example, what issues are addressed by adding a Load Balancer with multiple Web Servers?  CDN?  Master-Slave Replicas?  What are the alternatives and Trade-Offs for each?\n\nWe'll introduce some components to complete the design and to address scalability issues.  Internal load balancers are not shown to reduce clutter.\n\n*To avoid repeating discussions*, refer to the following system design topics for main talking points, tradeoffs, and alternatives:\n\n• DNS\n• CDN\n• Load balancer\n• Horizontal scaling\n• Web server (reverse proxy)\n• API server (application layer)\n• Cache\n• Relational database management system (RDBMS)\n• SQL write master-slave failover\n• Master-slave replication\n• Consistency patterns\n• Availability patterns\n\nThe Fanout Service is a potential bottleneck.  Twitter users with millions of followers could take several minutes to have their tweets go through the fanout process.  This could lead to race conditions with @replies to the tweet, which we could mitigate by re-ordering the tweets at serve time.\n\nWe could also avoid fanning out tweets from highly-followed users.  Instead, we could search to find tweets for highly-followed users, merge the search results with the user's home timeline results, then re-order the tweets at serve time.\n\nAdditional optimizations include:\n\n• Keep only several hundred tweets for each home timeline in the Memory Cache\n• Keep only active users' home timeline info in the Memory Cache\n    • If a user was not previously active in the past 30 days, we could rebuild the timeline from the SQL Database\n        • Query the User Graph Service to determine who the user is following\n        • Get the tweets from the SQL Database and add them to the Memory Cache\n• Store only a month of tweets in the Tweet Info Service\n• Store only active users in the User Info Service\n• The Search Cluster would likely need to keep the tweets in memory to keep latency low\n\nWe'll also want to address the bottleneck with the SQL Database.\n\nAlthough the Memory Cache should reduce the load on the database, it is unlikely the SQL Read Replicas alone would be enough to handle the cache misses.  We'll probably need to employ additional SQL scaling patterns.\n\nThe high volume of writes would overwhelm a single SQL Write Master-Slave, also pointing to a need for additional scaling techniques.\n\n• Federation\n• Sharding\n• Denormalization\n• SQL Tuning\n\nWe should also consider moving some data to a NoSQL Database."
+        }
+      ],
+      "keyTerms": [
+        "NoSQL database",
+        "Memory Cache",
+        "Object Store",
+        "Client",
+        "Web Server",
+        "Write API",
+        "SQL database",
+        "Fan Out Service",
+        "User Graph Service",
+        "Search Index Service",
+        "Notification Service",
+        "Queue",
+        "REST API",
+        "Read API",
+        "Timeline Service",
+        "Tweet Info Service",
+        "User Info Service",
+        "SQL Database",
+        "Search API",
+        "Search Service"
+      ]
+    },
+    {
+      "id": "web-crawler",
+      "title": "Design a web crawler",
+      "guided": true,
+      "useCases": [
+        "Service crawls a list of urls:",
+        "  Generates reverse index of words to pages containing the search terms",
+        "  Generates titles and snippets for pages",
+        "    Title and snippets are static, they do not change based on search query",
+        "User inputs a search term and sees a list of relevant pages with titles and snippets  the crawler generated",
+        "  Only sketch high level components and interactions for this use case, no need to go into depth",
+        "Service has high availability"
+      ],
+      "outOfScope": ["Search analytics", "Personalized search results", "Page rank"],
+      "assumptions": [
+        "Traffic is not evenly distributed",
+        "  Some searches are very popular, while others are only executed once",
+        "Support only anonymous users",
+        "Generating search results should be fast",
+        "The web crawler should not get stuck in an infinite loop",
+        "  We get stuck in an infinite loop if the graph contains a cycle",
+        "1 billion links to crawl",
+        "  Pages need to be crawled regularly to ensure freshness",
+        "  Average refresh rate of about once per week, more frequent for popular sites",
+        "    4 billion links crawled each month",
+        "  Average stored size per web page: 500 KB",
+        "    For simplicity, count changes the same as new pages",
+        "100 billion searches per month"
+      ],
+      "calculations": [
+        "2 PB of stored page content per month",
+        "  500 KB per page * 4 billion links crawled per month",
+        "  72 PB of stored page content in 3 years",
+        "1,600 write requests per second",
+        "40,000 search requests per second",
+        "2.5 million seconds per month",
+        "1 request per second = 2.5 million requests per month",
+        "40 requests per second = 100 million requests per month",
+        "400 requests per second = 1 billion requests per month"
+      ],
+      "walkthrough": [
+        {
+          "heading": "High-level design",
+          "body": "Outline a high level design with all important components."
+        },
+        {
+          "heading": "Use case: Service crawls a list of urls",
+          "body": "We'll assume we have an initial list of links_to_crawl ranked initially based on overall site popularity.  If this is not a reasonable assumption, we can seed the crawler with popular sites that link to outside content such as Yahoo, DMOZ, etc.\n\nWe'll use a table crawled_links to store processed links and their page signatures.\n\nWe could store links_to_crawl and crawled_links in a key-value NoSQL Database.  For the ranked links in links_to_crawl, we could use Redis with sorted sets to maintain a ranking of page links.  We should discuss the use cases and tradeoffs between choosing SQL or NoSQL.\n\n• The Crawler Service processes each page link by doing the following in a loop:\n    • Takes the top ranked page link to crawl\n        • Checks crawled_links in the NoSQL Database for an entry with a similar page signature\n            • If we have a similar page, reduces the priority of the page link\n                • This prevents us from getting into a cycle\n                • Continue\n            • Else, crawls the link\n                • Adds a job to the Reverse Index Service queue to generate a reverse index\n                • Adds a job to the Document Service queue to generate a static title and snippet\n                • Generates the page signature\n                • Removes the link from links_to_crawl in the NoSQL Database\n                • Inserts the page link and signature to crawled_links in the NoSQL Database\n\nClarify with your interviewer how much code you are expected to write.\n\nPagesDataStore is an abstraction within the Crawler Service that uses the NoSQL Database:\n\n```python\nclass PagesDataStore(object):\n\n    def __init__(self, db);\n        self.db = db\n        ...\n\n    def add_link_to_crawl(self, url):\n        \"\"\"Add the given link to links_to_crawl.\"\"\"\n        ...\n\n    def remove_link_to_crawl(self, url):\n        \"\"\"Remove the given link from links_to_crawl.\"\"\"\n        ...\n\n    def reduce_priority_link_to_crawl(self, url)\n        \"\"\"Reduce the priority of a link in links_to_crawl to avoid cycles.\"\"\"\n        ...\n\n    def extract_max_priority_page(self):\n        \"\"\"Return the highest priority link in links_to_crawl.\"\"\"\n        ...\n\n    def insert_crawled_link(self, url, signature):\n        \"\"\"Add the given link to crawled_links.\"\"\"\n        ...\n\n    def crawled_similar(self, signature):\n        \"\"\"Determine if we've already crawled a page matching the given signature\"\"\"\n        ...\n```\n\nPage is an abstraction within the Crawler Service that encapsulates a page, its contents, child urls, and signature:\n\n```python\nclass Page(object):\n\n    def __init__(self, url, contents, child_urls, signature):\n        self.url = url\n        self.contents = contents\n        self.child_urls = child_urls\n        self.signature = signature\n```\n\nCrawler is the main class within Crawler Service, composed of Page and PagesDataStore.\n\n```python\nclass Crawler(object):\n\n    def __init__(self, data_store, reverse_index_queue, doc_index_queue):\n        self.data_store = data_store\n        self.reverse_index_queue = reverse_index_queue\n        self.doc_index_queue = doc_index_queue\n\n    def create_signature(self, page):\n        \"\"\"Create signature based on url and contents.\"\"\"\n        ...\n\n    def crawl_page(self, page):\n        for url in page.child_urls:\n            self.data_store.add_link_to_crawl(url)\n        page.signature = self.create_signature(page)\n        self.data_store.remove_link_to_crawl(page.url)\n        self.data_store.insert_crawled_link(pa…"
+        },
+        {
+          "heading": "Handling duplicates",
+          "body": "We need to be careful the web crawler doesn't get stuck in an infinite loop, which happens when the graph contains a cycle.\n\nClarify with your interviewer how much code you are expected to write.\n\nWe'll want to remove duplicate urls:\n\n• For smaller lists we could use something like sort | unique\n• With 1 billion links to crawl, we could use MapReduce to output only entries that have a frequency of 1\n\n```python\nclass RemoveDuplicateUrls(MRJob):\n\n    def mapper(self, _, line):\n        yield line, 1\n\n    def reducer(self, key, values):\n        total = sum(values)\n        if total == 1:\n            yield key, total\n```\n\nDetecting duplicate content is more complex.  We could generate a signature based on the contents of the page and compare those two signatures for similarity.  Some potential algorithms are Jaccard index and cosine similarity."
+        },
+        {
+          "heading": "Determining when to update the crawl results",
+          "body": "Pages need to be crawled regularly to ensure freshness.  Crawl results could have a timestamp field that indicates the last time a page was crawled.  After a default time period, say one week, all pages should be refreshed.  Frequently updated or more popular sites could be refreshed in shorter intervals.\n\nAlthough we won't dive into details on analytics, we could do some data mining to determine the mean time before a particular page is updated, and use that statistic to determine how often to re-crawl the page.\n\nWe might also choose to support a Robots.txt file that gives webmasters control of crawl frequency."
+        },
+        {
+          "heading": "Use case: User inputs a search term and sees a list of relevant pages with titles and snippets",
+          "body": "• The Client sends a request to the Web Server, running as a reverse proxy\n• The Web Server forwards the request to the Query API server\n• The Query API server does the following:\n    • Parses the query\n        • Removes markup\n        • Breaks up the text into terms\n        • Fixes typos\n        • Normalizes capitalization\n        • Converts the query to use boolean operations\n    • Uses the Reverse Index Service to find documents matching the query\n        • The Reverse Index Service ranks the matching results and returns the top ones\n    • Uses the Document Service to return titles and snippets\n\nWe'll use a public REST API:\n\n```\n$ curl https://search.com/api/v1/search?query=hello+world\n```\n\nResponse:\n\n```\n{\n    \"title\": \"foo's title\",\n    \"snippet\": \"foo's snippet\",\n    \"link\": \"https://foo.com\",\n},\n{\n    \"title\": \"bar's title\",\n    \"snippet\": \"bar's snippet\",\n    \"link\": \"https://bar.com\",\n},\n{\n    \"title\": \"baz's title\",\n    \"snippet\": \"baz's snippet\",\n    \"link\": \"https://baz.com\",\n},\n```\n\nFor internal communications, we could use Remote Procedure Calls."
+        },
+        {
+          "heading": "Scaling the design",
+          "body": "Identify and address bottlenecks, given the constraints.\n\nImportant: Do not simply jump right into the final design from the initial design!\n\nState you would 1) Benchmark/Load Test, 2) Profile for bottlenecks 3) address bottlenecks while evaluating alternatives and trade-offs, and 4) repeat.  See Design a system that scales to millions of users on AWS as a sample on how to iteratively scale the initial design.\n\nIt's important to discuss what bottlenecks you might encounter with the initial design and how you might address each of them.  For example, what issues are addressed by adding a Load Balancer with multiple Web Servers?  CDN?  Master-Slave Replicas?  What are the alternatives and Trade-Offs for each?\n\nWe'll introduce some components to complete the design and to address scalability issues.  Internal load balancers are not shown to reduce clutter.\n\n*To avoid repeating discussions*, refer to the following system design topics for main talking points, tradeoffs, and alternatives:\n\n• DNS\n• Load balancer\n• Horizontal scaling\n• Web server (reverse proxy)\n• API server (application layer)\n• Cache\n• NoSQL\n• Consistency patterns\n• Availability patterns\n\nSome searches are very popular, while others are only executed once.  Popular queries can be served from a Memory Cache such as Redis or Memcached to reduce response times and to avoid overloading the Reverse Index Service and Document Service.  The Memory Cache is also useful for handling the unevenly distributed traffic and traffic spikes.  Reading 1 MB sequentially from memory takes about 250 microseconds, while reading from SSD takes 4x and from disk takes 80x longer.<sup><a href=https://github.com/donnemartin/system-design-primer#latency-numbers-every-programmer-should-know>1</a></sup>\n\nBelow are a few other optimizations to the Crawling Service:\n\n• To handle the data size and request load, the Reverse Index Service and Document Service will likely need to make heavy use sharding and federation.\n• DNS lookup can be a bottleneck, the Crawler Service can keep its own DNS lookup that is refreshed periodically\n• The Crawler Service can improve performance and reduce memory usage by keeping many open connections at a time, referred to as connection pooling\n    • Switching to UDP could also boost performance\n• Web crawling is bandwidth intensive, ensure there is enough bandwidth to sustain high throughput"
+        }
+      ],
+      "keyTerms": [
+        "NoSQL Database",
+        "Crawler Service",
+        "Reverse Index Service",
+        "Document Service",
+        "MapReduce",
+        "Client",
+        "Web Server",
+        "Query API",
+        "REST API",
+        "Profile",
+        "Load Balancer",
+        "Web Servers",
+        "CDN",
+        "Memory Cache",
+        "Crawling Service"
+      ]
+    },
+    {
+      "id": "mint",
+      "title": "Design Mint.com",
+      "guided": true,
+      "useCases": [
+        "User connects to a financial account",
+        "Service extracts transactions from the account",
+        "  Updates daily",
+        "  Categorizes transactions",
+        "    Allows manual category override by the user",
+        "    No automatic re-categorization",
+        "  Analyzes monthly spending, by category",
+        "Service recommends a budget",
+        "  Allows users to manually set a budget",
+        "  Sends notifications when approaching or exceeding budget",
+        "Service has high availability"
+      ],
+      "outOfScope": ["Service performs additional logging and analytics"],
+      "assumptions": [
+        "Traffic is not evenly distributed",
+        "Automatic daily update of accounts applies only to users active in the past 30 days",
+        "Adding or removing financial accounts is relatively rare",
+        "Budget notifications don't need to be instant",
+        "10 million users",
+        "  10 budget categories per user = 100 million budget items",
+        "  Example categories:",
+        "    Housing = $1,000",
+        "    Food = $200",
+        "    Gas = $100",
+        "  Sellers are used to determine transaction category",
+        "    50,000 sellers",
+        "30 million financial accounts",
+        "5 billion transactions per month",
+        "500 million read requests per month",
+        "10:1 write to read ratio",
+        "  Write-heavy, users make transactions daily, but few visit the site daily"
+      ],
+      "calculations": [
+        "Size per transaction:",
+        "  user_id - 8 bytes",
+        "  created_at - 5 bytes",
+        "  seller - 32 bytes",
+        "  amount - 5 bytes",
+        "  Total: ~50 bytes",
+        "250 GB of new transaction content per month",
+        "  50 bytes per transaction * 5 billion transactions per month",
+        "  9 TB of new transaction content in 3 years",
+        "  Assume most are new transactions instead of updates to existing ones",
+        "2,000 transactions per second on average",
+        "200 read requests per second on average",
+        "2.5 million seconds per month",
+        "1 request per second = 2.5 million requests per month",
+        "40 requests per second = 100 million requests per month",
+        "400 requests per second = 1 billion requests per month"
+      ],
+      "walkthrough": [
+        {
+          "heading": "High-level design",
+          "body": "Outline a high level design with all important components."
+        },
+        {
+          "heading": "Use case: User connects to a financial account",
+          "body": "We could store info on the 10 million users in a relational database.  We should discuss the use cases and tradeoffs between choosing SQL or NoSQL.\n\n• The Client sends a request to the Web Server, running as a reverse proxy\n• The Web Server forwards the request to the Accounts API server\n• The Accounts API server updates the SQL Database accounts table with the newly entered account info\n\nClarify with your interviewer how much code you are expected to write.\n\nThe accounts table could have the following structure:\n\n```\nid int NOT NULL AUTO_INCREMENT\ncreated_at datetime NOT NULL\nlast_update datetime NOT NULL\naccount_url varchar(255) NOT NULL\naccount_login varchar(32) NOT NULL\naccount_password_hash char(64) NOT NULL\nuser_id int NOT NULL\nPRIMARY KEY(id)\nFOREIGN KEY(user_id) REFERENCES users(id)\n```\n\nWe'll create an index on id, user_id , and created_at to speed up lookups (log-time instead of scanning the entire table) and to keep the data in memory.  Reading 1 MB sequentially from memory takes about 250 microseconds, while reading from SSD takes 4x and from disk takes 80x longer.<sup><a href=https://github.com/donnemartin/system-design-primer#latency-numbers-every-programmer-should-know>1</a></sup>\n\nWe'll use a public REST API:\n\n```\n$ curl -X POST --data '{ \"user_id\": \"foo\", \"account_url\": \"bar\", \\\n    \"account_login\": \"baz\", \"account_password\": \"qux\" }' \\\n    https://mint.com/api/v1/account\n```\n\nFor internal communications, we could use Remote Procedure Calls.\n\nNext, the service extracts transactions from the account."
+        },
+        {
+          "heading": "Use case: Service extracts transactions from the account",
+          "body": "We'll want to extract information from an account in these cases:\n\n• The user first links the account\n• The user manually refreshes the account\n• Automatically each day for users who have been active in the past 30 days\n\nData flow:\n\n• The Client sends a request to the Web Server\n• The Web Server forwards the request to the Accounts API server\n• The Accounts API server places a job on a Queue such as Amazon SQS or RabbitMQ\n    • Extracting transactions could take awhile, we'd probably want to do this asynchronously with a queue, although this introduces additional complexity\n• The Transaction Extraction Service does the following:\n    • Pulls from the Queue and extracts transactions for the given account from the financial institution, storing the results as raw log files in the Object Store\n    • Uses the Category Service to categorize each transaction\n    • Uses the Budget Service to calculate aggregate monthly spending by category\n        • The Budget Service uses the Notification Service to let users know if they are nearing or have exceeded their budget\n    • Updates the SQL Database transactions table with categorized transactions\n    • Updates the SQL Database monthly_spending table with aggregate monthly spending by category\n    • Notifies the user the transactions have completed through the Notification Service:\n        • Uses a Queue (not pictured) to asynchronously send out notifications\n\nThe transactions table could have the following structure:\n\n```\nid int NOT NULL AUTO_INCREMENT\ncreated_at datetime NOT NULL\nseller varchar(32) NOT NULL\namount decimal NOT NULL\nuser_id int NOT NULL\nPRIMARY KEY(id)\nFOREIGN KEY(user_id) REFERENCES users(id)\n```\n\nWe'll create an index on id, user_id , and created_at.\n\nThe monthly_spending table could have the following structure:\n\n```\nid int NOT NULL AUTO_INCREMENT\nmonth_year date NOT NULL\ncategory varchar(32)\namount decimal NOT NULL\nuser_id int NOT NULL\nPRIMARY KEY(id)\nFOREIGN KEY(user_id) REFERENCES users(id)\n```\n\nWe'll create an index on id and user_id .\n\n#### Category service\n\nFor the Category Service, we can seed a seller-to-category dictionary with the most popular sellers.  If we estimate 50,000 sellers and estimate each entry to take less than 255 bytes, the dictionary would only take about 12 MB of memory.\n\nClarify with your interviewer how much code you are expected to write.\n\n```python\nclass DefaultCategories(Enum):\n\n    HOUSING = 0\n    FOOD = 1\n    GAS = 2\n    SHOPPING = 3\n    ...\n\nseller_category_map = {}\nseller_category_map['Exxon'] = DefaultCategories.GAS\nseller_category_map['Target'] = DefaultCategories.SHOPPING\n...\n```\n\nFor sellers not initially seeded in the map, we could use a crowdsourcing effort by evaluating the manual category overrides our users provide.  We could use a heap to quickly lookup the top manual override per seller in O(1) time.\n\n```python\nclass Categorizer(object):\n\n    def __init__(self, seller_category_map, seller_category_crowd_overrides_map):\n        self.seller_category_map = seller_category_map\n        self.seller_category_crowd_overrides_map = \\\n            seller_category_crowd_overrides_map\n\n    def categorize(self, transaction):\n        if transaction.seller in self.seller_category_map:\n            return self.seller_category_map[transaction.seller]\n        elif transaction.seller in self.seller_category_crowd_overrides_map:\n            self.seller_category_map[transaction.seller] = \\\n                self.seller_category_crowd_overrides_map[transact…"
+        },
+        {
+          "heading": "Use case: Service recommends a budget",
+          "body": "To start, we could use a generic budget template that allocates category amounts based on income tiers.  Using this approach, we would not have to store the 100 million budget items identified in the constraints, only those that the user overrides.  If a user overrides a budget category, which we could store the override in the TABLE budget_overrides.\n\n```python\nclass Budget(object):\n\n    def __init__(self, income):\n        self.income = income\n        self.categories_to_budget_map = self.create_budget_template()\n\n    def create_budget_template(self):\n        return {\n            DefaultCategories.HOUSING: self.income * .4,\n            DefaultCategories.FOOD: self.income * .2,\n            DefaultCategories.GAS: self.income * .1,\n            DefaultCategories.SHOPPING: self.income * .2,\n            ...\n        }\n\n    def override_category_budget(self, category, amount):\n        self.categories_to_budget_map[category] = amount\n```\n\nFor the Budget Service, we can potentially run SQL queries on the transactions table to generate the monthly_spending aggregate table.  The monthly_spending table would likely have much fewer rows than the total 5 billion transactions, since users typically have many transactions per month.\n\nAs an alternative, we can run MapReduce jobs on the raw transaction files to:\n\n• Categorize each transaction\n• Generate aggregate monthly spending by category\n\nRunning analyses on the transaction files could significantly reduce the load on the database.\n\nWe could call the Budget Service to re-run the analysis if the user updates a category.\n\nClarify with your interviewer how much code you are expected to write.\n\nSample log file format, tab delimited:\n\n```\nuser_id   timestamp   seller  amount\n```\n\nMapReduce implementation:\n\n```python\nclass SpendingByCategory(MRJob):\n\n    def __init__(self, categorizer):\n        self.categorizer = categorizer\n        self.current_year_month = calc_current_year_month()\n        ...\n\n    def calc_current_year_month(self):\n        \"\"\"Return the current year and month.\"\"\"\n        ...\n\n    def extract_year_month(self, timestamp):\n        \"\"\"Return the year and month portions of the timestamp.\"\"\"\n        ...\n\n    def handle_budget_notifications(self, key, total):\n        \"\"\"Call notification API if nearing or exceeded budget.\"\"\"\n        ...\n\n    def mapper(self, _, line):\n        \"\"\"Parse each log line, extract and transform relevant lines.\n\n        Argument line will be of the form:\n\n        user_id   timestamp   seller  amount\n\n        Using the categorizer to convert seller to category,\n        emit key value pairs of the form:\n\n        (user_id, 2016-01, shopping), 25\n        (user_id, 2016-01, shopping), 100\n        (user_id, 2016-01, gas), 50\n        \"\"\"\n        user_id, timestamp, seller, amount = line.split('\\t')\n        category = self.categorizer.categorize(seller)\n        period = self.extract_year_month(timestamp)\n        if period == self.current_year_month:\n            yield (user_id, period, category), amount\n\n    def reducer(self, key, value):\n        \"\"\"Sum values for each key.\n\n        (user_id, 2016-01, shopping), 125\n        (user_id, 2016-01, gas), 50\n        \"\"\"\n        total = sum(values)\n        yield key, sum(values)\n```"
+        },
+        {
+          "heading": "Scaling the design",
+          "body": "Identify and address bottlenecks, given the constraints.\n\nImportant: Do not simply jump right into the final design from the initial design!\n\nState you would 1) Benchmark/Load Test, 2) Profile for bottlenecks 3) address bottlenecks while evaluating alternatives and trade-offs, and 4) repeat.  See Design a system that scales to millions of users on AWS as a sample on how to iteratively scale the initial design.\n\nIt's important to discuss what bottlenecks you might encounter with the initial design and how you might address each of them.  For example, what issues are addressed by adding a Load Balancer with multiple Web Servers?  CDN?  Master-Slave Replicas?  What are the alternatives and Trade-Offs for each?\n\nWe'll introduce some components to complete the design and to address scalability issues.  Internal load balancers are not shown to reduce clutter.\n\n*To avoid repeating discussions*, refer to the following system design topics for main talking points, tradeoffs, and alternatives:\n\n• DNS\n• CDN\n• Load balancer\n• Horizontal scaling\n• Web server (reverse proxy)\n• API server (application layer)\n• Cache\n• Relational database management system (RDBMS)\n• SQL write master-slave failover\n• Master-slave replication\n• Asynchronism\n• Consistency patterns\n• Availability patterns\n\nWe'll add an additional use case: User accesses summaries and transactions.\n\nUser sessions, aggregate stats by category, and recent transactions could be placed in a Memory Cache such as Redis or Memcached.\n\n• The Client sends a read request to the Web Server\n• The Web Server forwards the request to the Read API server\n    • Static content can be served from the Object Store such as S3, which is cached on the CDN\n• The Read API server does the following:\n    • Checks the Memory Cache for the content\n        • If the url is in the Memory Cache, returns the cached contents\n        • Else\n            • If the url is in the SQL Database, fetches the contents\n                • Updates the Memory Cache with the contents\n\nRefer to When to update the cache for tradeoffs and alternatives.  The approach above describes cache-aside.\n\nInstead of keeping the monthly_spending aggregate table in the SQL Database, we could create a separate Analytics Database using a data warehousing solution such as Amazon Redshift or Google BigQuery.\n\nWe might only want to store a month of transactions data in the database, while storing the rest in a data warehouse or in an Object Store.  An Object Store such as Amazon S3 can comfortably handle the constraint of 250 GB of new content per month.\n\nTo address the 200 *average* read requests per second (higher at peak), traffic for popular content should be handled by the Memory Cache instead of the database.  The Memory Cache is also useful for handling the unevenly distributed traffic and traffic spikes.  The SQL Read Replicas should be able to handle the cache misses, as long as the replicas are not bogged down with replicating writes.\n\n2,000 *average* transaction writes per second (higher at peak) might be tough for a single SQL Write Master-Slave.  We might need to employ additional SQL scaling patterns:\n\n• Federation\n• Sharding\n• Denormalization\n• SQL Tuning\n\nWe should also consider moving some data to a NoSQL Database."
+        }
+      ],
+      "keyTerms": [
+        "Client",
+        "Web Server",
+        "Accounts API",
+        "SQL Database",
+        "REST API",
+        "Queue",
+        "Transaction Extraction Service",
+        "Object Store",
+        "Category Service",
+        "Budget Service",
+        "Notification Service",
+        "MapReduce",
+        "Profile",
+        "Load Balancer",
+        "Web Servers",
+        "CDN",
+        "User",
+        "Memory Cache",
+        "Read API",
+        "Analytics Database"
+      ]
+    },
+    {
+      "id": "social-graph",
+      "title": "Design the data structures for a social network",
+      "guided": true,
+      "useCases": [
+        "User searches for someone and sees the shortest path to the searched person",
+        "Service has high availability",
+        "Traffic is not evenly distributed",
+        "  Some searches are more popular than others, while others are only executed once",
+        "Graph data won't fit on a single machine",
+        "Graph edges are unweighted",
+        "100 million users",
+        "50 friends per user average",
+        "1 billion friend searches per month",
+        "5 billion friend relationships",
+        "  100 million users * 50 friends per user average",
+        "400 search requests per second",
+        "2.5 million seconds per month",
+        "1 request per second = 2.5 million requests per month",
+        "40 requests per second = 100 million requests per month",
+        "400 requests per second = 1 billion requests per month"
+      ],
+      "outOfScope": [],
+      "assumptions": [
+        "Traffic is not evenly distributed",
+        "  Some searches are more popular than others, while others are only executed once",
+        "Graph data won't fit on a single machine",
+        "Graph edges are unweighted",
+        "100 million users",
+        "50 friends per user average",
+        "1 billion friend searches per month"
+      ],
+      "calculations": [
+        "5 billion friend relationships",
+        "  100 million users * 50 friends per user average",
+        "400 search requests per second",
+        "2.5 million seconds per month",
+        "1 request per second = 2.5 million requests per month",
+        "40 requests per second = 100 million requests per month",
+        "400 requests per second = 1 billion requests per month"
+      ],
+      "walkthrough": [
+        {
+          "heading": "High-level design",
+          "body": "Outline a high level design with all important components."
+        },
+        {
+          "heading": "Use case: User searches for someone and sees the shortest path to the searched person",
+          "body": "Clarify with your interviewer how much code you are expected to write.\n\nWithout the constraint of millions of users (vertices) and billions of friend relationships (edges), we could solve this unweighted shortest path task with a general BFS approach:\n\n```python\nclass Graph(Graph):\n\n    def shortest_path(self, source, dest):\n        if source is None or dest is None:\n            return None\n        if source is dest:\n            return [source.key]\n        prev_node_keys = self._shortest_path(source, dest)\n        if prev_node_keys is None:\n            return None\n        else:\n            path_ids = [dest.key]\n            prev_node_key = prev_node_keys[dest.key]\n            while prev_node_key is not None:\n                path_ids.append(prev_node_key)\n                prev_node_key = prev_node_keys[prev_node_key]\n            return path_ids[::-1]\n\n    def _shortest_path(self, source, dest):\n        queue = deque()\n        queue.append(source)\n        prev_node_keys = {source.key: None}\n        source.visit_state = State.visited\n        while queue:\n            node = queue.popleft()\n            if node is dest:\n                return prev_node_keys\n            prev_node = node\n            for adj_node in node.adj_nodes.values():\n                if adj_node.visit_state == State.unvisited:\n                    queue.append(adj_node)\n                    prev_node_keys[adj_node.key] = prev_node.key\n                    adj_node.visit_state = State.visited\n        return None\n```\n\nWe won't be able to fit all users on the same machine, we'll need to shard users across Person Servers and access them with a Lookup Service.\n\n• The Client sends a request to the Web Server, running as a reverse proxy\n• The Web Server forwards the request to the Search API server\n• The Search API server forwards the request to the User Graph Service\n• The User Graph Service does the following:\n    • Uses the Lookup Service to find the Person Server where the current user's info is stored\n    • Finds the appropriate Person Server to retrieve the current user's list of friend_ids\n    • Runs a BFS search using the current user as the source and the current user's friend_ids as the ids for each adjacent_node\n    • To get the adjacent_node from a given id:\n        • The User Graph Service will *again* need to communicate with the Lookup Service to determine which Person Server stores theadjacent_node matching the given id (potential for optimization)\n\nClarify with your interviewer how much code you should be writing.\n\nNote: Error handling is excluded below for simplicity.  Ask if you should code proper error handing.\n\nLookup Service implementation:\n\n```python\nclass LookupService(object):\n\n    def __init__(self):\n        self.lookup = self._init_lookup()  # key: person_id, value: person_server\n\n    def _init_lookup(self):\n        ...\n\n    def lookup_person_server(self, person_id):\n        return self.lookup[person_id]\n```\n\nPerson Server implementation:\n\n```python\nclass PersonServer(object):\n\n    def __init__(self):\n        self.people = {}  # key: person_id, value: person\n\n    def add_person(self, person):\n        ...\n\n    def people(self, ids):\n        results = []\n        for id in ids:\n            if id in self.people:\n                results.append(self.people[id])\n        return results\n```\n\nPerson implementation:\n\n```python\nclass Person(object):\n\n    def __init__(self, id, name, friend_ids):\n        self.id = id\n        self.name = name\n        self.friend_ids = fr…"
+        },
+        {
+          "heading": "Scaling the design",
+          "body": "Identify and address bottlenecks, given the constraints.\n\nImportant: Do not simply jump right into the final design from the initial design!\n\nState you would 1) Benchmark/Load Test, 2) Profile for bottlenecks 3) address bottlenecks while evaluating alternatives and trade-offs, and 4) repeat.  See Design a system that scales to millions of users on AWS as a sample on how to iteratively scale the initial design.\n\nIt's important to discuss what bottlenecks you might encounter with the initial design and how you might address each of them.  For example, what issues are addressed by adding a Load Balancer with multiple Web Servers?  CDN?  Master-Slave Replicas?  What are the alternatives and Trade-Offs for each?\n\nWe'll introduce some components to complete the design and to address scalability issues.  Internal load balancers are not shown to reduce clutter.\n\n*To avoid repeating discussions*, refer to the following system design topics for main talking points, tradeoffs, and alternatives:\n\n• DNS\n• Load balancer\n• Horizontal scaling\n• Web server (reverse proxy)\n• API server (application layer)\n• Cache\n• Consistency patterns\n• Availability patterns\n\nTo address the constraint of 400 *average* read requests per second (higher at peak), person data can be served from a Memory Cache such as Redis or Memcached to reduce response times and to reduce traffic to downstream services.  This could be especially useful for people who do multiple searches in succession and for people who are well-connected.  Reading 1 MB sequentially from memory takes about 250 microseconds, while reading from SSD takes 4x and from disk takes 80x longer.<sup><a href=https://github.com/donnemartin/system-design-primer#latency-numbers-every-programmer-should-know>1</a></sup>\n\nBelow are further optimizations:\n\n• Store complete or partial BFS traversals to speed up subsequent lookups in the Memory Cache\n• Batch compute offline then store complete or partial BFS traversals to speed up subsequent lookups in a NoSQL Database\n• Reduce machine jumps by batching together friend lookups hosted on the same Person Server\n    • Shard Person Servers by location to further improve this, as friends generally live closer to each other\n• Do two BFS searches at the same time, one starting from the source, and one from the destination, then merge the two paths\n• Start the BFS search from people with large numbers of friends, as they are more likely to reduce the number of degrees of separation between the current user and the search target\n• Set a limit based on time or number of hops before asking the user if they want to continue searching, as searching could take a considerable amount of time in some cases\n• Use a Graph Database such as Neo4j or a graph-specific query language such as GraphQL (if there were no constraint preventing the use of Graph Databases)"
+        }
+      ],
+      "keyTerms": [
+        "Person Servers",
+        "Lookup Service",
+        "Client",
+        "Web Server",
+        "Search API",
+        "User Graph Service",
+        "Person Server",
+        "Note",
+        "Person",
+        "REST API",
+        "Profile",
+        "Load Balancer",
+        "Web Servers",
+        "CDN",
+        "Memory Cache",
+        "NoSQL Database",
+        "Graph Database",
+        "Graph Databases"
+      ]
+    },
+    {
+      "id": "query-cache",
+      "title": "Design a key-value cache to save the results of the most recent web server queries",
+      "guided": true,
+      "useCases": [
+        "User sends a search request resulting in a cache hit",
+        "User sends a search request resulting in a cache miss",
+        "Service has high availability",
+        "Traffic is not evenly distributed",
+        "  Popular queries should almost always be in the cache",
+        "  Need to determine how to expire/refresh",
+        "Serving from cache requires fast lookups",
+        "Low latency between machines",
+        "Limited memory in cache",
+        "  Need to determine what to keep/remove",
+        "  Need to cache millions of queries",
+        "10 million users",
+        "10 billion queries per month",
+        "Cache stores ordered list of key: query, value: results",
+        "  query - 50 bytes",
+        "  title - 20 bytes",
+        "  snippet - 200 bytes",
+        "  Total: 270 bytes",
+        "2.7 TB of cache data per month if all 10 billion queries are unique and all are stored",
+        "  270 bytes per search * 10 billion searches per month",
+        "  Assumptions state limited memory, need to determine how to expire contents",
+        "4,000 requests per second",
+        "2.5 million seconds per month",
+        "1 request per second = 2.5 million requests per month",
+        "40 requests per second = 100 million requests per month",
+        "400 requests per second = 1 billion requests per month"
+      ],
+      "outOfScope": [],
+      "assumptions": [
+        "Traffic is not evenly distributed",
+        "  Popular queries should almost always be in the cache",
+        "  Need to determine how to expire/refresh",
+        "Serving from cache requires fast lookups",
+        "Low latency between machines",
+        "Limited memory in cache",
+        "  Need to determine what to keep/remove",
+        "  Need to cache millions of queries",
+        "10 million users",
+        "10 billion queries per month"
+      ],
+      "calculations": [
+        "Cache stores ordered list of key: query, value: results",
+        "  query - 50 bytes",
+        "  title - 20 bytes",
+        "  snippet - 200 bytes",
+        "  Total: 270 bytes",
+        "2.7 TB of cache data per month if all 10 billion queries are unique and all are stored",
+        "  270 bytes per search * 10 billion searches per month",
+        "  Assumptions state limited memory, need to determine how to expire contents",
+        "4,000 requests per second",
+        "2.5 million seconds per month",
+        "1 request per second = 2.5 million requests per month",
+        "40 requests per second = 100 million requests per month",
+        "400 requests per second = 1 billion requests per month"
+      ],
+      "walkthrough": [
+        {
+          "heading": "High-level design",
+          "body": "Outline a high level design with all important components."
+        },
+        {
+          "heading": "Use case: User sends a request resulting in a cache hit",
+          "body": "Popular queries can be served from a Memory Cache such as Redis or Memcached to reduce read latency and to avoid overloading the Reverse Index Service and Document Service.  Reading 1 MB sequentially from memory takes about 250 microseconds, while reading from SSD takes 4x and from disk takes 80x longer.<sup><a href=https://github.com/donnemartin/system-design-primer#latency-numbers-every-programmer-should-know>1</a></sup>\n\nSince the cache has limited capacity, we'll use a least recently used (LRU) approach to expire older entries.\n\n• The Client sends a request to the Web Server, running as a reverse proxy\n• The Web Server forwards the request to the Query API server\n• The Query API server does the following:\n    • Parses the query\n        • Removes markup\n        • Breaks up the text into terms\n        • Fixes typos\n        • Normalizes capitalization\n        • Converts the query to use boolean operations\n    • Checks the Memory Cache for the content matching the query\n        • If there's a hit in the Memory Cache, the Memory Cache does the following:\n            • Updates the cached entry's position to the front of the LRU list\n            • Returns the cached contents\n        • Else, the Query API does the following:\n            • Uses the Reverse Index Service to find documents matching the query\n                • The Reverse Index Service ranks the matching results and returns the top ones\n            • Uses the Document Service to return titles and snippets\n            • Updates the Memory Cache with the contents, placing the entry at the front of the LRU list\n\n#### Cache implementation\n\nThe cache can use a doubly-linked list: new items will be added to the head while items to expire will be removed from the tail.  We'll use a hash table for fast lookups to each linked list node.\n\nClarify with your interviewer how much code you are expected to write.\n\nQuery API Server implementation:\n\n```python\nclass QueryApi(object):\n\n    def __init__(self, memory_cache, reverse_index_service):\n        self.memory_cache = memory_cache\n        self.reverse_index_service = reverse_index_service\n\n    def parse_query(self, query):\n        \"\"\"Remove markup, break text into terms, deal with typos,\n        normalize capitalization, convert to use boolean operations.\n        \"\"\"\n        ...\n\n    def process_query(self, query):\n        query = self.parse_query(query)\n        results = self.memory_cache.get(query)\n        if results is None:\n            results = self.reverse_index_service.process_search(query)\n            self.memory_cache.set(query, results)\n        return results\n```\n\nNode implementation:\n\n```python\nclass Node(object):\n\n    def __init__(self, query, results):\n        self.query = query\n        self.results = results\n```\n\nLinkedList implementation:\n\n```python\nclass LinkedList(object):\n\n    def __init__(self):\n        self.head = None\n        self.tail = None\n\n    def move_to_front(self, node):\n        ...\n\n    def append_to_front(self, node):\n        ...\n\n    def remove_from_tail(self):\n        ...\n```\n\nCache implementation:\n\n```python\nclass Cache(object):\n\n    def __init__(self, MAX_SIZE):\n        self.MAX_SIZE = MAX_SIZE\n        self.size = 0\n        self.lookup = {}  # key: query, value: node\n        self.linked_list = LinkedList()\n\n    def get(self, query)\n        \"\"\"Get the stored query result from the cache.\n\n        Accessing a node updates its position to the front of the LRU list.\n        \"\"\"\n        node = self.lookup[query]…"
+        },
+        {
+          "heading": "Scaling the design",
+          "body": "Identify and address bottlenecks, given the constraints.\n\nImportant: Do not simply jump right into the final design from the initial design!\n\nState you would 1) Benchmark/Load Test, 2) Profile for bottlenecks 3) address bottlenecks while evaluating alternatives and trade-offs, and 4) repeat.  See Design a system that scales to millions of users on AWS as a sample on how to iteratively scale the initial design.\n\nIt's important to discuss what bottlenecks you might encounter with the initial design and how you might address each of them.  For example, what issues are addressed by adding a Load Balancer with multiple Web Servers?  CDN?  Master-Slave Replicas?  What are the alternatives and Trade-Offs for each?\n\nWe'll introduce some components to complete the design and to address scalability issues.  Internal load balancers are not shown to reduce clutter.\n\n*To avoid repeating discussions*, refer to the following system design topics for main talking points, tradeoffs, and alternatives:\n\n• DNS\n• Load balancer\n• Horizontal scaling\n• Web server (reverse proxy)\n• API server (application layer)\n• Cache\n• Consistency patterns\n• Availability patterns\n\n### Expanding the Memory Cache to many machines\n\nTo handle the heavy request load and the large amount of memory needed, we'll scale horizontally.  We have three main options on how to store the data on our Memory Cache cluster:\n\n• Each machine in the cache cluster has its own cache - Simple, although it will likely result in a low cache hit rate.\n• Each machine in the cache cluster has a copy of the cache - Simple, although it is an inefficient use of memory.\n• The cache is sharded across all machines in the cache cluster - More complex, although it is likely the best option.  We could use hashing to determine which machine could have the cached results of a query using machine = hash(query).  We'll likely want to use consistent hashing."
+        }
+      ],
+      "keyTerms": [
+        "Memory Cache",
+        "Reverse Index Service",
+        "Document Service",
+        "Client",
+        "Web Server",
+        "Query API",
+        "Query API Server",
+        "Node",
+        "LinkedList",
+        "Cache",
+        "Profile",
+        "Load Balancer",
+        "Web Servers",
+        "CDN"
+      ]
+    },
+    {
+      "id": "sales-rank",
+      "title": "Design Amazon's sales rank by category feature",
+      "guided": true,
+      "useCases": [
+        "Service calculates the past week's most popular products by category",
+        "User views the past week's most popular products by category",
+        "Service has high availability"
+      ],
+      "outOfScope": [
+        "The general e-commerce site",
+        "  Design components only for calculating sales rank"
+      ],
+      "assumptions": [
+        "Traffic is not evenly distributed",
+        "Items can be in multiple categories",
+        "Items cannot change categories",
+        "There are no subcategories ie foo/bar/baz",
+        "Results must be updated hourly",
+        "  More popular products might need to be updated more frequently",
+        "10 million products",
+        "1000 categories",
+        "1 billion transactions per month",
+        "100 billion read requests per month",
+        "100:1 read to write ratio"
+      ],
+      "calculations": [
+        "Size per transaction:",
+        "  created_at - 5 bytes",
+        "  product_id - 8 bytes",
+        "  category_id - 4 bytes",
+        "  seller_id - 8 bytes",
+        "  buyer_id - 8 bytes",
+        "  quantity - 4 bytes",
+        "  total_price - 5 bytes",
+        "  Total: ~40 bytes",
+        "40 GB of new transaction content per month",
+        "  40 bytes per transaction * 1 billion transactions per month",
+        "  1.44 TB of new transaction content in 3 years",
+        "  Assume most are new transactions instead of updates to existing ones",
+        "400 transactions per second on average",
+        "40,000 read requests per second on average",
+        "2.5 million seconds per month",
+        "1 request per second = 2.5 million requests per month",
+        "40 requests per second = 100 million requests per month",
+        "400 requests per second = 1 billion requests per month"
+      ],
+      "walkthrough": [
+        {
+          "heading": "High-level design",
+          "body": "Outline a high level design with all important components."
+        },
+        {
+          "heading": "Use case: Service calculates the past week's most popular products by category",
+          "body": "We could store the raw Sales API server log files on a managed Object Store such as Amazon S3, rather than managing our own distributed file system.\n\nClarify with your interviewer how much code you are expected to write.\n\nWe'll assume this is a sample log entry, tab delimited:\n\n```\ntimestamp   product_id  category_id    qty     total_price   seller_id    buyer_id\nt1          product1    category1      2       20.00         1            1\nt2          product1    category2      2       20.00         2            2\nt2          product1    category2      1       10.00         2            3\nt3          product2    category1      3        7.00         3            4\nt4          product3    category2      7        2.00         4            5\nt5          product4    category1      1        5.00         5            6\n...\n```\n\nThe Sales Rank Service could use MapReduce, using the Sales API server log files as input and writing the results to an aggregate table sales_rank in a SQL Database.  We should discuss the use cases and tradeoffs between choosing SQL or NoSQL.\n\nWe'll use a multi-step MapReduce:\n\n• Step 1 - Transform the data to (category, product_id), sum(quantity)\n• Step 2 - Perform a distributed sort\n\n```python\nclass SalesRanker(MRJob):\n\n    def within_past_week(self, timestamp):\n        \"\"\"Return True if timestamp is within past week, False otherwise.\"\"\"\n        ...\n\n    def mapper(self, _ line):\n        \"\"\"Parse each log line, extract and transform relevant lines.\n\n        Emit key value pairs of the form:\n\n        (category1, product1), 2\n        (category2, product1), 2\n        (category2, product1), 1\n        (category1, product2), 3\n        (category2, product3), 7\n        (category1, product4), 1\n        \"\"\"\n        timestamp, product_id, category_id, quantity, total_price, seller_id, \\\n            buyer_id = line.split('\\t')\n        if self.within_past_week(timestamp):\n            yield (category_id, product_id), quantity\n\n    def reducer(self, key, value):\n        \"\"\"Sum values for each key.\n\n        (category1, product1), 2\n        (category2, product1), 3\n        (category1, product2), 3\n        (category2, product3), 7\n        (category1, product4), 1\n        \"\"\"\n        yield key, sum(values)\n\n    def mapper_sort(self, key, value):\n        \"\"\"Construct key to ensure proper sorting.\n\n        Transform key and value to the form:\n\n        (category1, 2), product1\n        (category2, 3), product1\n        (category1, 3), product2\n        (category2, 7), product3\n        (category1, 1), product4\n\n        The shuffle/sort step of MapReduce will then do a\n        distributed sort on the keys, resulting in:\n\n        (category1, 1), product4\n        (category1, 2), product1\n        (category1, 3), product2\n        (category2, 3), product1\n        (category2, 7), product3\n        \"\"\"\n        category_id, product_id = key\n        quantity = value\n        yield (category_id, quantity), product_id\n\n    def reducer_identity(self, key, value):\n        yield key, value\n\n    def steps(self):\n        \"\"\"Run the map and reduce steps.\"\"\"\n        return [\n            self.mr(mapper=self.mapper,\n                    reducer=self.reducer),\n            self.mr(mapper=self.mapper_sort,\n                    reducer=self.reducer_identity),\n        ]\n```\n\nThe result would be the following sorted list, which we could insert into the sales_rank table:\n\n```\n(category1, 1), product4\n(category1, 2), product1\n(category1, 3), product2\n(category2, 3), product1…"
+        },
+        {
+          "heading": "Use case: User views the past week's most popular products by category",
+          "body": "• The Client sends a request to the Web Server, running as a reverse proxy\n• The Web Server forwards the request to the Read API server\n• The Read API server reads from the SQL Database sales_rank table\n\nWe'll use a public REST API:\n\n```\n$ curl https://amazon.com/api/v1/popular?category_id=1234\n```\n\nResponse:\n\n```\n{\n    \"id\": \"100\",\n    \"category_id\": \"1234\",\n    \"total_sold\": \"100000\",\n    \"product_id\": \"50\",\n},\n{\n    \"id\": \"53\",\n    \"category_id\": \"1234\",\n    \"total_sold\": \"90000\",\n    \"product_id\": \"200\",\n},\n{\n    \"id\": \"75\",\n    \"category_id\": \"1234\",\n    \"total_sold\": \"80000\",\n    \"product_id\": \"3\",\n},\n```\n\nFor internal communications, we could use Remote Procedure Calls."
+        },
+        {
+          "heading": "Scaling the design",
+          "body": "Identify and address bottlenecks, given the constraints.\n\nImportant: Do not simply jump right into the final design from the initial design!\n\nState you would 1) Benchmark/Load Test, 2) Profile for bottlenecks 3) address bottlenecks while evaluating alternatives and trade-offs, and 4) repeat.  See Design a system that scales to millions of users on AWS as a sample on how to iteratively scale the initial design.\n\nIt's important to discuss what bottlenecks you might encounter with the initial design and how you might address each of them.  For example, what issues are addressed by adding a Load Balancer with multiple Web Servers?  CDN?  Master-Slave Replicas?  What are the alternatives and Trade-Offs for each?\n\nWe'll introduce some components to complete the design and to address scalability issues.  Internal load balancers are not shown to reduce clutter.\n\n*To avoid repeating discussions*, refer to the following system design topics for main talking points, tradeoffs, and alternatives:\n\n• DNS\n• CDN\n• Load balancer\n• Horizontal scaling\n• Web server (reverse proxy)\n• API server (application layer)\n• Cache\n• Relational database management system (RDBMS)\n• SQL write master-slave failover\n• Master-slave replication\n• Consistency patterns\n• Availability patterns\n\nThe Analytics Database could use a data warehousing solution such as Amazon Redshift or Google BigQuery.\n\nWe might only want to store a limited time period of data in the database, while storing the rest in a data warehouse or in an Object Store.  An Object Store such as Amazon S3 can comfortably handle the constraint of 40 GB of new content per month.\n\nTo address the 40,000 *average* read requests per second (higher at peak), traffic for popular content (and their sales rank) should be handled by the Memory Cache instead of the database.  The Memory Cache is also useful for handling the unevenly distributed traffic and traffic spikes.  With the large volume of reads, the SQL Read Replicas might not be able to handle the cache misses.  We'll probably need to employ additional SQL scaling patterns.\n\n400 *average* writes per second (higher at peak) might be tough for a single SQL Write Master-Slave, also pointing to a need for additional scaling techniques.\n\nSQL scaling patterns include:\n\n• Federation\n• Sharding\n• Denormalization\n• SQL Tuning\n\nWe should also consider moving some data to a NoSQL Database."
+        }
+      ],
+      "keyTerms": [
+        "Sales API",
+        "Object Store",
+        "Sales Rank Service",
+        "MapReduce",
+        "SQL Database",
+        "Client",
+        "Web Server",
+        "Read API",
+        "REST API",
+        "Profile",
+        "Load Balancer",
+        "Web Servers",
+        "CDN",
+        "Analytics Database",
+        "Memory Cache",
+        "SQL Read Replicas",
+        "NoSQL Database"
+      ]
+    },
+    {
+      "id": "scaling-aws",
+      "title": "Design a system that scales to millions of users on AWS",
+      "guided": true,
+      "useCases": [
+        "User makes a read or write request",
+        "  Service does processing, stores user data, then returns the results",
+        "Service needs to evolve from serving a small amount of users to millions of users",
+        "  Discuss general scaling patterns as we evolve an architecture to handle a large number of users and requests",
+        "Service has high availability",
+        "Traffic is not evenly distributed",
+        "Need for relational data",
+        "Scale from 1 user to tens of millions of users",
+        "  Denote increase of users as:",
+        "    Users+",
+        "    Users++",
+        "    Users+++",
+        "    ...",
+        "  10 million users",
+        "  1 billion writes per month",
+        "  100 billion reads per month",
+        "  100:1 read to write ratio",
+        "  1 KB content per write",
+        "1 TB of new content per month",
+        "  1 KB per write * 1 billion writes per month",
+        "  36 TB of new content in 3 years",
+        "  Assume most writes are from new content instead of updates to existing ones",
+        "400 writes per second on average",
+        "40,000 reads per second on average",
+        "2.5 million seconds per month",
+        "1 request per second = 2.5 million requests per month",
+        "40 requests per second = 100 million requests per month",
+        "400 requests per second = 1 billion requests per month"
+      ],
+      "outOfScope": [],
+      "assumptions": [
+        "Traffic is not evenly distributed",
+        "Need for relational data",
+        "Scale from 1 user to tens of millions of users",
+        "  Denote increase of users as:",
+        "    Users+",
+        "    Users++",
+        "    Users+++",
+        "    ...",
+        "  10 million users",
+        "  1 billion writes per month",
+        "  100 billion reads per month",
+        "  100:1 read to write ratio",
+        "  1 KB content per write"
+      ],
+      "calculations": [
+        "1 TB of new content per month",
+        "  1 KB per write * 1 billion writes per month",
+        "  36 TB of new content in 3 years",
+        "  Assume most writes are from new content instead of updates to existing ones",
+        "400 writes per second on average",
+        "40,000 reads per second on average",
+        "2.5 million seconds per month",
+        "1 request per second = 2.5 million requests per month",
+        "40 requests per second = 100 million requests per month",
+        "400 requests per second = 1 billion requests per month"
+      ],
+      "walkthrough": [
+        {
+          "heading": "High-level design",
+          "body": "Outline a high level design with all important components."
+        },
+        {
+          "heading": "Use case: User makes a read or write request",
+          "body": "#### Goals\n\n• With only 1-2 users, you only need a basic setup\n    • Single box for simplicity\n    • Vertical scaling when needed\n    • Monitor to determine bottlenecks\n\n#### Start with a single box\n\n• Web server on EC2\n    • Storage for user data\n    • MySQL Database\n\nUse Vertical Scaling:\n\n• Simply choose a bigger box\n• Keep an eye on metrics to determine how to scale up\n    • Use basic monitoring to determine bottlenecks: CPU, memory, IO, network, etc\n    • CloudWatch, top, nagios, statsd, graphite, etc\n• Scaling vertically can get very expensive\n• No redundancy/failover\n\n*Trade-offs, alternatives, and additional details:*\n\n• The alternative to Vertical Scaling is Horizontal scaling\n\n#### Start with SQL, consider NoSQL\n\nThe constraints assume there is a need for relational data.  We can start off using a MySQL Database on the single box.\n\n*Trade-offs, alternatives, and additional details:*\n\n• See the Relational database management system (RDBMS) section\n• Discuss reasons to use SQL or NoSQL\n\n#### Assign a public static IP\n\n• Elastic IPs provide a public endpoint whose IP doesn't change on reboot\n• Helps with failover, just point the domain to a new IP\n\n#### Use a DNS\n\nAdd a DNS such as Route 53 to map the domain to the instance's public IP.\n\n*Trade-offs, alternatives, and additional details:*\n\n• See the Domain name system section\n\n#### Secure the web server\n\n• Open up only necessary ports\n    • Allow the web server to respond to incoming requests from:\n        • 80 for HTTP\n        • 443 for HTTPS\n        • 22 for SSH to only whitelisted IPs\n    • Prevent the web server from initiating outbound connections\n\n*Trade-offs, alternatives, and additional details:*\n\n• See the Security section"
+        },
+        {
+          "heading": "Scaling the design",
+          "body": "Identify and address bottlenecks, given the constraints.\n\n### Users+\n\n#### Assumptions\n\nOur user count is starting to pick up and the load is increasing on our single box.  Our Benchmarks/Load Tests and Profiling are pointing to the MySQL Database taking up more and more memory and CPU resources, while the user content is filling up disk space.\n\nWe've been able to address these issues with Vertical Scaling so far.  Unfortunately, this has become quite expensive and it doesn't allow for independent scaling of the MySQL Database and Web Server.\n\n#### Goals\n\n• Lighten load on the single box and allow for independent scaling\n    • Store static content separately in an Object Store\n    • Move the MySQL Database to a separate box\n• Disadvantages\n    • These changes would increase complexity and would require changes to the Web Server to point to the Object Store and the MySQL Database\n    • Additional security measures must be taken to secure the new components\n    • AWS costs could also increase, but should be weighed with the costs of managing similar systems on your own\n\n#### Store static content separately\n\n• Consider using a managed Object Store like S3 to store static content\n    • Highly scalable and reliable\n    • Server side encryption\n• Move static content to S3\n    • User files\n    • JS\n    • CSS\n    • Images\n    • Videos\n\n#### Move the MySQL database to a separate box\n\n• Consider using a service like RDS to manage the MySQL Database\n    • Simple to administer, scale\n    • Multiple availability zones\n    • Encryption at rest\n\n#### Secure the system\n\n• Encrypt data in transit and at rest\n• Use a Virtual Private Cloud\n    • Create a public subnet for the single Web Server so it can send and receive traffic from the internet\n    • Create a private subnet for everything else, preventing outside access\n    • Only open ports from whitelisted IPs for each component\n• These same patterns should be implemented for new components in the remainder of the exercise\n\n*Trade-offs, alternatives, and additional details:*\n\n• See the Security section\n\n### Users++\n\n#### Assumptions\n\nOur Benchmarks/Load Tests and Profiling show that our single Web Server bottlenecks during peak hours, resulting in slow responses and in some cases, downtime.  As the service matures, we'd also like to move towards higher availability and redundancy.\n\n#### Goals\n\n• The following goals attempt to address the scaling issues with the Web Server\n    • Based on the Benchmarks/Load Tests and Profiling, you might only need to implement one or two of these techniques\n• Use Horizontal Scaling to handle increasing loads and to address single points of failure\n    • Add a Load Balancer such as Amazon's ELB or HAProxy\n        • ELB is highly available\n        • If you are configuring your own Load Balancer, setting up multiple servers in active-active or active-passive in multiple availability zones will improve availability\n        • Terminate SSL on the Load Balancer to reduce computational load on backend servers and to simplify certificate administration\n    • Use multiple Web Servers spread out over multiple availability zones\n    • Use multiple MySQL instances in Master-Slave Failover mode across multiple availability zones to improve redundancy\n• Separate out the Web Servers from the Application Servers\n    • Scale and configure both layers independently\n    • Web Servers can run as a Reverse Proxy\n    • For example, you can add Application Servers handling Read APIs while ot…"
+        }
+      ],
+      "keyTerms": [
+        "Web server",
+        "MySQL Database",
+        "Vertical Scaling",
+        "Horizontal scaling",
+        "DNS",
+        "Profiling",
+        "Web Server",
+        "Object Store",
+        "Horizontal Scaling",
+        "Load Balancer",
+        "Web Servers",
+        "MySQL",
+        "Application Servers",
+        "Reverse Proxy",
+        "Read APIs",
+        "Write APIs",
+        "Internal Load Balancers",
+        "Memory Cache",
+        "Autoscaling",
+        "MySQL Read Replicas"
+      ]
+    },
+    {
+      "id": "design-a-file-sync-service-like-dropbox",
+      "title": "Design a file sync service like Dropbox",
+      "guided": false
+    },
+    {
+      "id": "design-a-search-engine-like-google",
+      "title": "Design a search engine like Google",
+      "guided": false
+    },
+    {
+      "id": "design-a-scalable-web-crawler-like-google",
+      "title": "Design a scalable web crawler like Google",
+      "guided": false
+    },
+    { "id": "design-google-docs", "title": "Design Google docs", "guided": false },
+    {
+      "id": "design-a-key-value-store-like-redis",
+      "title": "Design a key-value store like Redis",
+      "guided": false
+    },
+    {
+      "id": "design-a-cache-system-like-memcached",
+      "title": "Design a cache system like Memcached",
+      "guided": false
+    },
+    {
+      "id": "design-a-recommendation-system-like-amazon-s",
+      "title": "Design a recommendation system like Amazon's",
+      "guided": false
+    },
+    {
+      "id": "design-a-tinyurl-system-like-bitly",
+      "title": "Design a tinyurl system like Bitly",
+      "guided": false
+    },
+    {
+      "id": "design-a-chat-app-like-whatsapp",
+      "title": "Design a chat app like WhatsApp",
+      "guided": false
+    },
+    {
+      "id": "design-a-picture-sharing-system-like-instagram",
+      "title": "Design a picture sharing system like Instagram",
+      "guided": false
+    },
+    {
+      "id": "design-the-facebook-news-feed-function",
+      "title": "Design the Facebook news feed function",
+      "guided": false
+    },
+    {
+      "id": "design-the-facebook-timeline-function",
+      "title": "Design the Facebook timeline function",
+      "guided": false
+    },
+    {
+      "id": "design-the-facebook-chat-function",
+      "title": "Design the Facebook chat function",
+      "guided": false
+    },
+    {
+      "id": "design-a-graph-search-function-like-facebook-s",
+      "title": "Design a graph search function like Facebook's",
+      "guided": false
+    },
+    {
+      "id": "design-a-content-delivery-network-like-cloudflare",
+      "title": "Design a content delivery network like CloudFlare",
+      "guided": false
+    },
+    {
+      "id": "design-a-trending-topic-system-like-twitter-s",
+      "title": "Design a trending topic system like Twitter's",
+      "guided": false
+    },
+    {
+      "id": "design-a-random-id-generation-system",
+      "title": "Design a random ID generation system",
+      "guided": false
+    },
+    {
+      "id": "return-the-top-k-requests-during-a-time-interval",
+      "title": "Return the top k requests during a time interval",
+      "guided": false
+    },
+    {
+      "id": "design-a-system-that-serves-data-from-multiple-data-centers",
+      "title": "Design a system that serves data from multiple data centers",
+      "guided": false
+    },
+    {
+      "id": "design-an-online-multiplayer-card-game",
+      "title": "Design an online multiplayer card game",
+      "guided": false
+    },
+    {
+      "id": "design-a-garbage-collection-system",
+      "title": "Design a garbage collection system",
+      "guided": false
+    },
+    { "id": "design-an-api-rate-limiter", "title": "Design an API rate limiter", "guided": false },
+    {
+      "id": "design-a-stock-exchange-like-nasdaq-or-binance",
+      "title": "Design a Stock Exchange (like NASDAQ or Binance)",
+      "guided": false
+    }
+  ]
+}
