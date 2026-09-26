@@ -1,7 +1,7 @@
 # CLAUDE.md: source of truth for the hackathon build
 
 > If code and this file disagree, that is a bug. Fix whichever one is wrong, in the same change.
-> Last updated: 2026-09-26, approved scope and team-plan revision. Contract + fixture exist; feature implementation has not started.
+> Last updated: 2026-09-26, A1 foundation implemented on `feat/interview-engine`. Shared workspace/API types, safe fixtures and the mock/Gemini adapter exist; live pillar implementation is still pending.
 > Assignment checklist: [Team implementation plan](docs/superpowers/plans/2026-09-26-team-kickoff.md). A, B and C start now; D joins later. Planned additions below are requirements, not claims of implemented behavior.
 
 ## 1. Summary
@@ -33,6 +33,8 @@ We are building an AI interview platform on top of the FoloUp codebase (Next.js 
 | Lint | Biome (`npm run check:ci` in CI) | Already in FoloUp. |
 
 **Not used:** Retell (replaced by our turn loop), auth (see cut list), Prisma (listed in package.json but there's no schema; don't use it).
+
+**A1 foundation:** `src/lib/llm.ts` and private fixture/projection modules use Next.js's `server-only` boundary marker. `LLM_MODE` must be set explicitly to `mock` or `gemini`; mock returns task fixture data without network access, and live mode requires `GEMINI_API_KEY`. Read [A1 handoff](docs/handoffs/a1-foundation.md) for imports, examples and checks.
 
 ## 3. Pillars
 
@@ -105,11 +107,11 @@ Status values: `not started` → `in progress` → `demo path works` → `done`.
 - no score is uncited
 - the integrity output has no verdict-like keys or yes/no fields
 
-Build against the fixture until the upstream pillar is live. `LLM_MODE=mock` should make every LLM call return fixture data (to be implemented in the `src/lib/llm.ts` adapter).
+Build against the fixture until the upstream pillar is live. `LLM_MODE=mock` makes `generateJson()` return its supplied task fixture output. B/A must route new pipeline calls through this adapter; legacy FoloUp calls have not yet been migrated. Browser code imports `src/fixtures/client-golden-interview.ts`, never the private golden fixture. Run `npm run fixture:client` after changing the golden fixture or projection.
 
-### Approved contract work to land first (A owns implementation)
+### A1 contract additions (implemented; A owns further changes)
 
-The following is the implementation target approved with the workspace scope. It is **not yet present** in `src/types/pipeline.ts`. A lands the shared types and client-safe projections first; B/C/D consume that change before connecting live modules. Any further change still follows §6.
+The optional workspace/artifact types below now exist in `src/types/pipeline.ts`; API/module types are in `src/types/pipeline-api.ts`. Client projections and independent fixtures are implemented. Runtime input validation, state transitions and persistence remain A2/D tasks; the limits below are their requirements. B/C/D consume the A1 foundation commit before connecting live modules. Any further contract change still follows §6.
 
 - Add optional `QuestionLadder.workspace`: `{ kind: "code" } | { kind: "whiteboard"; prompt: string }`. A code workspace requires `codeSnippet`. Existing technical plans with a snippet and no workspace continue to select code mode. A whiteboard workspace uses its prompt at `scenarioTwist`; other rungs use the existing ladder.
 - Add optional `Turn.artifacts: AnswerArtifact[]`, where `AnswerArtifact` is `{ kind: "code"; language: string; code: string } | { kind: "whiteboard"; sceneJson: string }`. Version 1 allows at most one artifact per candidate turn, matching that question's workspace. The parent turn provides ID, claim and timing; no new artifact citation format is introduced.
@@ -222,7 +224,7 @@ Use this as a provisional 6-hour build plus 1-hour protected demo buffer. Confir
 
 **Reuse:**
 - `src/actions/parse-pdf.ts` (PDF → text)
-- the Gemini call pattern in `src/services/analytics.service.ts` (`new GoogleGenAI(...)`, `gemini-2.5-flash`, JSON mode). There's no shared helper yet, so **A creates `src/lib/llm.ts` first**; B uses its published interface.
+- `src/lib/llm.ts` now provides the shared Gemini JSON adapter, based on the existing pattern in `src/services/analytics.service.ts`. B uses its published `generateJson(LlmRequest): Promise<unknown>` interface and validates the returned task shape.
 - `src/components/ui/*` (shadcn)
 - the Supabase services in `src/services/*`
 - the camera `getUserMedia` setup in `src/components/call/index.tsx`

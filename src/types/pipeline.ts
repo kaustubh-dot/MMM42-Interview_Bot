@@ -11,8 +11,15 @@ export const RUNG_ORDER: Rung[] = ["initial", "termFollowUp", "scenarioTwist", "
 export interface CodeSnippet {
   language: string;
   code: string;
-  plantedIssue: string; // hidden from candidate; used by grader only
+  plantedIssue: string; // server-side reference only; excluded from client projections
 }
+
+export type QuestionWorkspace = { kind: "code" } | { kind: "whiteboard"; prompt: string };
+
+// Supporting artifacts for human review; citations remain offsets into Turn.text.
+export type AnswerArtifact =
+  | { kind: "code"; language: string; code: string }
+  | { kind: "whiteboard"; sceneJson: string };
 
 export interface QuestionLadder {
   fundamental: string;
@@ -22,6 +29,7 @@ export interface QuestionLadder {
   scenarioTwist: string;
   whyDefenseTemplate: string;
   codeSnippet?: CodeSnippet; // only for technical claims; shown on the scenarioTwist rung
+  workspace?: QuestionWorkspace; // absent + codeSnippet retains the legacy code workspace
 }
 
 export interface Claim {
@@ -74,6 +82,7 @@ export interface Turn {
   claimId: string;
   rung: Rung;
   typedAnswer?: string; // code-reasoning rung only
+  artifacts?: AnswerArtifact[]; // at most one per candidate turn; validated by the turn API
 }
 
 export interface AreaState {

@@ -17,6 +17,9 @@ yarn dev                # open http://localhost:3000 in Chrome (Web Speech API)
 - Shared types: `src/types/pipeline.ts`
 - Sample interview (dev fixture and demo fallback): `src/fixtures/golden-interview.ts`. Regenerate it with `npm run fixture:golden`.
 - Database schema: `supabase_schema.sql`
+- A1 foundation and teammate import examples: [handoff](docs/handoffs/a1-foundation.md).
+- Foundation checks: `npm run test:foundation` (existing TypeScript compiler + Node test runner).
+- Browser fixture: `src/fixtures/client-golden-interview.ts`; regenerate with `npm run fixture:client`.
 
 ## Stack
 
