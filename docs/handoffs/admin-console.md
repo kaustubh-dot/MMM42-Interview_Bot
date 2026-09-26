@@ -46,8 +46,16 @@ npx tsc -p tsconfig.admin.json && node --test tests/admin-console.test.cjs
 npx biome check src/components/admin src/components/invite src/lib/admin "src/app/(pipeline)/admin" "src/app/(pipeline)/invite"
 ```
 
+## Sign-in
+
+- `/login` has two choices. **Candidate** needs no password. **Recruiter** needs the team passcode `ADMIN_PASSCODE`; in dev, if it's unset, the passcode is `recruiter`.
+- A recruiter gets an httpOnly cookie holding the SHA-256 of the passcode. Changing the passcode signs everyone out.
+- `/admin` is checked in `src/proxy.ts` and again in the admin layout.
+- The Recruiters tab only shows for recruiters. Candidate pages (`/interview`, `/invite`, `/practice`) stay open.
+- This is a shared-passcode role gate, not user accounts. Real auth stays cut (CLAUDE.md §12). Pipeline API routes are not gated.
+
 ## Known limits
 
-- There is no auth (cut in CLAUDE.md §12), so `/admin` is open.
+- The recruiter gate is a shared passcode: no per-user accounts and no rate limiting on sign-in.
 - The scheduled time lives in the link and is not enforced by the server.
 - Data is per browser, and a demo attempt only runs while the server is in mock mode.

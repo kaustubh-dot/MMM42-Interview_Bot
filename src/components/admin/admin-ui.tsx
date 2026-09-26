@@ -107,26 +107,6 @@ export function relativeWhen(iso: string, now = Date.now()): string {
   return rtf.format(value, unit);
 }
 
-export function StatTile({
-  label,
-  value,
-  hint,
-  tone = "bg-white",
-}: {
-  label: string;
-  value: ReactNode;
-  hint?: ReactNode;
-  tone?: string;
-}) {
-  return (
-    <div className={`nb-card ${tone} space-y-1 p-5`}>
-      <p className="text-sm font-bold uppercase tracking-wide text-gray-600">{label}</p>
-      <p className="text-4xl font-black">{value}</p>
-      {hint && <p className="text-sm text-gray-700">{hint}</p>}
-    </div>
-  );
-}
-
 export function Field({
   id,
   label,
@@ -167,4 +147,72 @@ export async function copyText(text: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+// ---------- Compact layout pieces ----------
+
+export function PageHeader({
+  title,
+  subtitle,
+  back,
+  actions,
+}: {
+  title: ReactNode;
+  subtitle?: ReactNode;
+  back?: ReactNode;
+  actions?: ReactNode;
+}) {
+  return (
+    <header className="flex flex-wrap items-end gap-3">
+      <div className="min-w-0 flex-1 space-y-1">
+        {back}
+        <h1 className="text-2xl font-black tracking-tight">{title}</h1>
+        {subtitle && <div className="text-sm text-gray-600">{subtitle}</div>}
+      </div>
+      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+    </header>
+  );
+}
+
+/** Bordered section with a slim title bar. */
+export function Panel({
+  title,
+  actions,
+  children,
+  className = "",
+}: {
+  title: ReactNode;
+  actions?: ReactNode;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <section className={`nb-card overflow-hidden ${className}`}>
+      <div className="flex flex-wrap items-center gap-2 border-b border-[#111]/15 px-4 py-2.5">
+        <h2 className="font-bold">{title}</h2>
+        {actions && <div className="ml-auto flex items-center gap-2">{actions}</div>}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+export function StatRow({
+  items,
+}: { items: { label: string; value: ReactNode; hint?: string }[] }) {
+  return (
+    <div className="nb-card grid grid-cols-2 divide-[#111]/15 md:grid-cols-4 md:divide-x">
+      {items.map((s) => (
+        <div key={s.label} className="px-4 py-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">{s.label}</p>
+          <p className="text-xl font-black">{s.value}</p>
+          {s.hint && <p className="text-xs text-gray-500">{s.hint}</p>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function EmptyRow({ children }: { children: ReactNode }) {
+  return <p className="px-4 py-3 text-sm text-gray-600">{children}</p>;
 }

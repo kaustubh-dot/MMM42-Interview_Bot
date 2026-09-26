@@ -5,12 +5,13 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { type ReactNode, createContext, useContext } from "react";
 import { useAdmin } from "./admin-store";
+import "./admin.css";
 import { type SyncControls, useInterviewSync } from "./use-interview-sync";
 
 const TABS = [
   { href: "/admin", label: "Overview", icon: LayoutDashboard },
-  { href: "/admin/jobs", label: "Jobs & rankings", icon: Briefcase },
-  { href: "/admin/schedule", label: "Schedule interview", icon: CalendarPlus },
+  { href: "/admin/jobs", label: "Jobs", icon: Briefcase },
+  { href: "/admin/schedule", label: "Schedule", icon: CalendarPlus },
 ];
 
 const SyncContext = createContext<SyncControls | null>(null);
@@ -55,20 +56,17 @@ export function AdminShell({ children }: { children: ReactNode }) {
 
   return (
     <SyncContext.Provider value={sync}>
-      <div className="nb-orbs min-h-[calc(100vh-5rem)]">
-        <div className="mx-auto max-w-7xl space-y-6 px-4 py-8 md:px-6">
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="nb-pill nb-bg-lavender">Recruiter console</span>
-            <nav aria-label="Recruiter console" className="flex flex-wrap gap-2">
+      <div className="nb-admin min-h-[calc(100vh-5rem)] bg-[#fafafa]">
+        <div className="border-b border-[#111]/15 bg-white">
+          <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-1 px-4 py-2 md:px-6">
+            <nav aria-label="Recruiter console" className="flex flex-wrap gap-1">
               {TABS.map(({ href, label, icon: Icon }) => (
                 <Link
                   key={href}
                   href={href}
                   aria-current={active(href) ? "page" : undefined}
-                  className={`flex items-center gap-2 rounded-lg border-2 px-3 py-1.5 text-sm font-bold ${
-                    active(href)
-                      ? "border-[#111] bg-white shadow-[3px_3px_0_#111]"
-                      : "border-transparent hover:border-[#111] hover:bg-white"
+                  className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-semibold ${
+                    active(href) ? "bg-[#eeeefe] text-[#111]" : "text-gray-600 hover:bg-[#f3f3f3]"
                   }`}
                 >
                   <Icon className="h-4 w-4" />
@@ -80,9 +78,11 @@ export function AdminShell({ children }: { children: ReactNode }) {
               <SyncButton sync={sync} />
             </span>
           </div>
+        </div>
 
+        <div className="mx-auto max-w-6xl space-y-5 px-4 py-6 md:px-6">
           {saveFailed && (
-            <p role="alert" className="nb-card flat nb-bg-soft-salmon p-3 text-sm font-medium">
+            <p role="alert" className="nb-card nb-bg-soft-salmon p-3 text-sm font-medium">
               This browser didn't let us save. Your changes are kept until you close the tab.
             </p>
           )}
@@ -90,15 +90,14 @@ export function AdminShell({ children }: { children: ReactNode }) {
           {hydrated ? (
             children
           ) : (
-            <div className="nb-card mx-auto flex max-w-md items-center justify-center gap-3 p-8 font-medium">
-              <Loader2 className="h-4 w-4 animate-spin" /> Loading your console…
-            </div>
+            <p className="flex items-center gap-2 text-sm text-gray-600">
+              <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+            </p>
           )}
 
-          <p className="border-t-2 border-dashed border-[#111]/20 pt-4 text-xs text-gray-600">
-            Demo storage: jobs, candidate names, notes and decisions are saved in this browser only.
-            Interviews run on the server, which keeps them in memory until it restarts. Names are
-            never sent to the scoring step.
+          <p className="pt-2 text-xs text-gray-500">
+            Demo storage: jobs, names, notes and decisions stay in this browser. Names are never
+            sent to scoring.
           </p>
         </div>
       </div>
