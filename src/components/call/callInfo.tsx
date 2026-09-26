@@ -440,7 +440,7 @@ function CallInfo({ call_id, onDeleteResponse, onCandidateStatusChange }: CallPr
               <div
                 className="text-sm p-4 rounded-2xl leading-5 bg-slate-50"
                 // biome-ignore lint/security/noDangerouslySetInnerHtml: required for markdown rendering
-                dangerouslySetInnerHTML={{ __html: marked(transcript) }}
+                dangerouslySetInnerHTML={{ __html: marked(transcript, { async: false }) as string }}
               />
             </ScrollArea>
           </div>

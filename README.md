@@ -9,7 +9,7 @@ An AI interview platform that asks about the specific claims on a candidate's re
 ## Quick start
 
 ```bash
-cp .env.example .env    # fill in Supabase + Gemini keys
+cp .env.example .env    # fill in Supabase + Gemini keys; LLM_MODE=mock (no key) or gemini
 yarn install            # or npm install
 yarn dev                # open http://localhost:3000 in Chrome (Web Speech API)
 ```

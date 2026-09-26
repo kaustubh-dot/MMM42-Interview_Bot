@@ -20,8 +20,10 @@
   "dependencies": {
     "@emotion/react": "^11.11.4",
     "@emotion/styled": "^11.11.5",
+    "@excalidraw/excalidraw": "^0.18.1",
     "@google/genai": "^1.49.0",
     "@hookform/resolvers": "^3.3.2",
+    "@monaco-editor/react": "^4.7.0",
     "@mui/material": "^5.15.20",
     "@mui/x-charts": "^7.7.1",
     "@nextui-org/progress": "^2.0.33",
