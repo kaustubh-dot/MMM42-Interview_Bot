@@ -1,0 +1,308 @@
+/*
+ * Neo-brutalist theme for the interview app (inspired by dummyjson.com's visual language):
+ * 2px near-black outlines, offset solid shadows, lavender/salmon accents, soft blurred orbs.
+ * Scoped under .nb so the legacy FoloUp dashboard is unaffected.
+ */
+
+.nb {
+  --nb-ink: #111;
+  --nb-lavender: #b6b7fd;
+  --nb-salmon: #ffc3be;
+  --nb-indigo: #494cf3;
+  --nb-coral: #ff697c;
+  --nb-input: #f3f3f3;
+  --nb-code: #263238;
+  --nb-c1: #f67e7f;
+  --nb-c2: #55b9b7;
+  --nb-c3: #757bf3;
+  --nb-c4: #f67cab;
+  --nb-mint: #46dbc9;
+  color: var(--nb-ink);
+  background: #fff;
+}
+
+.nb a.nb-link {
+  color: var(--nb-indigo);
+  text-decoration: underline 0.15em transparent;
+  text-underline-offset: 0.2em;
+  transition: text-decoration-color 0.3s;
+}
+.nb a.nb-link:hover {
+  text-decoration-color: currentColor;
+}
+
+/* ── Buttons: outlined with a solid offset shadow that moves closer on hover ── */
+.nb-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  height: 48px;
+  padding: 0 25px;
+  border: 2px solid var(--nb-ink);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--nb-ink);
+  font-size: 16px;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: 5px 5px 0 var(--nb-ink);
+  transition: transform 0.15s ease-out, box-shadow 0.15s ease-out;
+}
+.nb-btn:hover {
+  transform: translate(2px, 2px);
+  box-shadow: 3px 3px 0 var(--nb-ink);
+}
+.nb-btn:active {
+  transform: translate(5px, 5px);
+  box-shadow: 0 0 0 var(--nb-ink);
+}
+.nb-btn:focus-visible {
+  outline: 3px solid var(--nb-indigo);
+  outline-offset: 4px;
+}
+.nb-btn.primary {
+  background: var(--nb-lavender);
+}
+.nb-btn.secondary {
+  background: var(--nb-salmon);
+}
+.nb-btn.sm {
+  height: 38px;
+  padding: 0 16px;
+  font-size: 14px;
+  box-shadow: 3px 3px 0 var(--nb-ink);
+}
+.nb-btn.sm:hover {
+  box-shadow: 1px 1px 0 var(--nb-ink);
+}
+.nb-btn.lg {
+  height: 56px;
+  padding: 0 32px;
+  font-size: 18px;
+}
+.nb-btn:disabled,
+.nb-btn[aria-disabled="true"] {
+  background: #f5f5f5;
+  color: #b3b3b3;
+  border-color: #b3b3b3;
+  box-shadow: 5px 5px 0 #d4d4d4;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* ── Cards ── */
+.nb-card {
+  background: #fff;
+  border: 2px solid var(--nb-ink);
+  border-radius: 1.25rem;
+  box-shadow: 6px 6px 0 var(--nb-ink);
+}
+.nb-card.flat {
+  box-shadow: none;
+}
+.nb-card.hoverable {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.nb-card.hoverable:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: 8px 8px 0 var(--nb-ink);
+}
+
+/* Colored tiles (dummyjson resource cards) */
+.nb-tile {
+  border: 2px solid var(--nb-ink);
+  border-radius: 1rem;
+  color: #fff;
+  box-shadow: 6px 6px 0 var(--nb-ink);
+}
+.nb-bg-1 {
+  background: var(--nb-c1);
+}
+.nb-bg-2 {
+  background: var(--nb-c2);
+}
+.nb-bg-3 {
+  background: var(--nb-c3);
+}
+.nb-bg-4 {
+  background: var(--nb-c4);
+}
+.nb-bg-lavender {
+  background: var(--nb-lavender);
+}
+.nb-bg-salmon {
+  background: var(--nb-salmon);
+}
+.nb-bg-soft-lavender {
+  background: #eeeefe;
+}
+.nb-bg-soft-salmon {
+  background: #fff0ee;
+}
+
+/* ── Pills ── */
+.nb-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 2px solid var(--nb-ink);
+  border-radius: 999px;
+  padding: 0.1rem 0.7rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  background: #fff;
+  white-space: nowrap;
+}
+
+/* ── Inputs ── */
+.nb-input {
+  width: 100%;
+  background: var(--nb-input);
+  border: 2px solid transparent;
+  border-radius: 1rem;
+  padding: 0.9rem 1rem;
+  font-size: 1rem;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.nb-input:focus {
+  border-color: var(--nb-lavender);
+  background: #fff;
+}
+
+/* Dark code block */
+.nb-code {
+  font-family: "Courier New", Courier, monospace;
+  background: var(--nb-code);
+  color: #e9eded;
+  border: 2px solid var(--nb-ink);
+  border-radius: 0.5rem;
+}
+
+/* ── Glass navbar ── */
+.nb-navbar {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: rgba(255, 255, 255, 0.6);
+  box-shadow: 0 4px 10px rgba(148, 148, 148, 0.1);
+  backdrop-filter: blur(6.3px);
+  -webkit-backdrop-filter: blur(6.3px);
+}
+
+/* ── Blurred background orbs ── */
+.nb-orbs {
+  position: relative;
+  isolation: isolate;
+  /* clip (not hidden): keeps orbs inside without creating a scroll container, so sticky works */
+  overflow: clip;
+}
+.nb-orbs::before,
+.nb-orbs::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  width: 300px;
+  height: 300px;
+  border-radius: 50%;
+  background: var(--nb-lavender);
+  filter: blur(150px);
+  pointer-events: none;
+}
+.nb-orbs::before {
+  top: -60px;
+  left: -80px;
+}
+.nb-orbs::after {
+  bottom: -80px;
+  right: -60px;
+}
+.nb-orbs.alt::before,
+.nb-orbs.alt::after {
+  background: var(--nb-salmon);
+}
+.nb-orbs.mint::before {
+  background: var(--nb-mint);
+  opacity: 0.6;
+}
+
+/* ── Live interview visuals ── */
+@keyframes nb-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(182, 183, 253, 0.8);
+  }
+  50% {
+    transform: scale(1.04);
+    box-shadow: 0 0 0 14px rgba(182, 183, 253, 0);
+  }
+}
+.nb-speaking {
+  animation: nb-pulse 1.4s ease-in-out infinite;
+}
+@keyframes nb-listen {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 105, 124, 0.6);
+  }
+  50% {
+    box-shadow: 0 0 0 12px rgba(255, 105, 124, 0);
+  }
+}
+.nb-listening {
+  animation: nb-listen 1.6s ease-in-out infinite;
+}
+@keyframes nb-bar {
+  0%,
+  100% {
+    transform: scaleY(0.35);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+.nb-eq span {
+  display: inline-block;
+  width: 4px;
+  height: 18px;
+  margin: 0 1px;
+  border-radius: 2px;
+  background: currentColor;
+  transform-origin: bottom;
+  animation: nb-bar 0.9s ease-in-out infinite;
+}
+.nb-eq span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.nb-eq span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+.nb-eq span:nth-child(4) {
+  animation-delay: 0.45s;
+}
+
+@keyframes nb-bounce {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(0.4rem);
+  }
+}
+.nb-bounce {
+  animation: nb-bounce 2s infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nb-speaking,
+  .nb-listening,
+  .nb-eq span,
+  .nb-bounce {
+    animation: none;
+  }
+}

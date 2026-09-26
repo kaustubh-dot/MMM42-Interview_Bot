@@ -1,7 +1,7 @@
 "use client";
 
 import type { WorkspaceExample } from "@/fixtures/workspace-interview";
-import Link from "next/link";
+import { NbLinkButton, SectionHeading } from "../ui";
 import { TranscriptPanel } from "./transcript-panel";
 
 /**
@@ -10,32 +10,42 @@ import { TranscriptPanel } from "./transcript-panel";
  */
 export function WorkspaceSamplesView({ examples }: { examples: WorkspaceExample[] }) {
   return (
-    <div className="mx-auto max-w-5xl space-y-6 p-4 md:p-6">
-      <header className="flex flex-wrap items-center gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold">Workspace submission samples</h1>
-          <p className="text-sm text-gray-600">
-            Saved code and drawings as a recruiter sees them. Supporting artifacts for human review:
-            not scored, and no code is run.
+    <div className="nb-orbs alt">
+      <div className="mx-auto max-w-5xl space-y-8 px-4 py-8 md:px-6">
+        <header className="space-y-3">
+          <h1 className="text-3xl font-black tracking-tight md:text-4xl">
+            Saved code &amp; drawings
+          </h1>
+          <p className="text-lg text-gray-700">
+            This is how a reviewer sees what a candidate built during a technical question. Code and
+            drawings are saved for a person to look at. They aren't scored and code is never run.
+            Only the spoken explanation is scored.
           </p>
-        </div>
-        <Link href="/report/sample" className="ml-auto text-sm text-indigo-700 hover:underline">
-          Full sample report (fixture)
-        </Link>
-      </header>
-      {examples.map((ex) => (
-        <section key={ex.record.plan.interviewId} className="space-y-2">
-          <span className="rounded-full border border-indigo-300 bg-indigo-50 px-2.5 py-0.5 text-xs font-medium text-indigo-800">
-            {ex.label}
-          </span>
-          <TranscriptPanel
-            turns={ex.record.turns}
-            selected={null}
-            focusTurnId={null}
-            artifactsOpen
-          />
-        </section>
-      ))}
+          <div className="flex flex-wrap gap-3">
+            <NbLinkButton href="/practice" variant="primary" size="sm">
+              Try the workspace yourself
+            </NbLinkButton>
+            <NbLinkButton href="/report/sample" size="sm">
+              Full sample report
+            </NbLinkButton>
+          </div>
+        </header>
+        {examples.map((ex) => (
+          <section key={ex.record.plan.interviewId} className="space-y-3">
+            <SectionHeading
+              title={ex.kind === "code" ? "Code answer" : "Whiteboard answer"}
+              star={ex.kind === "code" ? "#b6b7fd" : "#ffc3be"}
+            />
+            <span className="nb-pill nb-bg-salmon">{ex.label}</span>
+            <TranscriptPanel
+              turns={ex.record.turns}
+              selected={null}
+              focusTurnId={null}
+              artifactsOpen
+            />
+          </section>
+        ))}
+      </div>
     </div>
   );
 }

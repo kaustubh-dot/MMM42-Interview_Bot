@@ -1,11 +1,11 @@
 "use client";
 
-import { Button } from "@/components/ui/button";
 import { Loader2 } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { PipelineApiError, generateReport, loadReport } from "../api-client";
 import type { ClientInterviewReport } from "../contract";
+import { NbButton, NbLinkButton } from "../ui";
 import { ReportView } from "./report-view";
 
 type State =
@@ -51,26 +51,21 @@ export function ReportLoader({ interviewId }: { interviewId: string }) {
   }
   if (state.kind === "loading") {
     return (
-      <div className="flex items-center justify-center gap-2 p-16 text-sm text-gray-600">
+      <div className="nb-card mx-auto my-16 flex max-w-xl items-center justify-center gap-3 p-8 font-medium">
         <Loader2 className="h-4 w-4 animate-spin" />
         {state.generating ? "Generating the evaluation and audit..." : "Loading report..."}
       </div>
     );
   }
   return (
-    <div
-      role="alert"
-      className="mx-auto mt-16 max-w-xl rounded-lg border border-red-200 bg-red-50 p-5 text-sm"
-    >
-      <p className="font-medium text-red-800">The report is not available.</p>
-      <p className="mt-1 text-red-700">{state.message}</p>
+    <div role="alert" className="nb-card mx-auto my-16 max-w-xl space-y-3 p-6">
+      <p className="text-xl font-black">This report isn't available yet.</p>
+      <p className="text-gray-700">{state.message}</p>
       <div className="mt-3 flex gap-3">
-        <Button type="button" onClick={load}>
-          Retry
-        </Button>
-        <Button asChild type="button" variant="outline">
-          <Link href="/report/sample">Open the sample report (fixture)</Link>
-        </Button>
+        <NbButton variant="primary" onClick={load}>
+          Try again
+        </NbButton>
+        <NbLinkButton href="/report/sample">See the sample report</NbLinkButton>
       </div>
     </div>
   );

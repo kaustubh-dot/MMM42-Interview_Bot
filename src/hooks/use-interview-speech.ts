@@ -96,6 +96,9 @@ export function useInterviewSpeech({ onFinalChunk, lang = "en-US" }: Options) {
   const wantListeningRef = useRef(false);
   const speakingRef = useRef(false);
   const firstSpeechRef = useRef<number | null>(null);
+  // Last time any candidate speech (interim or final) was heard: drives "you paused, so your
+  // answer is sent" in the live interview.
+  const lastHeardRef = useRef<number | null>(null);
   const onFinalRef = useRef(onFinalChunk);
   onFinalRef.current = onFinalChunk;
 
@@ -107,6 +110,7 @@ export function useInterviewSpeech({ onFinalChunk, lang = "en-US" }: Options) {
   }, []);
 
   const markFirstSpeech = useCallback(() => {
+    lastHeardRef.current = performance.now();
     if (firstSpeechRef.current === null) {
       firstSpeechRef.current = performance.now();
       setFirstSpeechAtPerf(firstSpeechRef.current);
@@ -258,9 +262,12 @@ export function useInterviewSpeech({ onFinalChunk, lang = "en-US" }: Options) {
     }
   }, []);
 
+  const lastHeardAt = useCallback(() => lastHeardRef.current, []);
+
   /** Clears the first-speech timestamp before a new question. */
   const resetAnswerTiming = useCallback(() => {
     firstSpeechRef.current = null;
+    lastHeardRef.current = null;
     setFirstSpeechAtPerf(null);
   }, []);
 
@@ -282,6 +289,8 @@ export function useInterviewSpeech({ onFinalChunk, lang = "en-US" }: Options) {
     firstSpeechAtPerf,
     /** Call when the candidate types, so typed answers also get a start time. */
     markFirstSpeech,
+    /** performance.now() of the last heard speech in this answer, or null. */
+    lastHeardAt,
     startListening,
     stopListening,
     speak,

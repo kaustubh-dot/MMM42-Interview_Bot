@@ -1,11 +1,10 @@
 "use client";
 
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { Loader2 } from "lucide-react";
+import { FileText, Loader2, Sparkles, Upload } from "lucide-react";
 import { useState } from "react";
 import { PipelineApiError, createPlan } from "./api-client";
 import type { ClientInterviewPlan } from "./contract";
+import { Explainer, NbButton } from "./ui";
 
 interface Props {
   onPlan: (plan: ClientInterviewPlan) => void;
@@ -13,6 +12,42 @@ interface Props {
 }
 
 const MAX_PDF_BYTES = 10 * 1024 * 1024;
+
+function FilePicker({
+  id,
+  label,
+  hint,
+  file,
+  onPick,
+}: {
+  id: string;
+  label: string;
+  hint: string;
+  file: File | null;
+  onPick: (f: File | undefined) => void;
+}) {
+  return (
+    <label
+      htmlFor={id}
+      className="flex cursor-pointer items-center gap-4 rounded-2xl border-2 border-dashed border-[#111] bg-[#f3f3f3] p-4 transition-colors hover:bg-white"
+    >
+      <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border-2 border-[#111] bg-white">
+        {file ? <FileText className="h-6 w-6" /> : <Upload className="h-6 w-6" />}
+      </span>
+      <span className="min-w-0">
+        <span className="block font-bold">{label}</span>
+        <span className="block truncate text-sm text-gray-600">{file ? file.name : hint}</span>
+      </span>
+      <input
+        id={id}
+        type="file"
+        accept="application/pdf,.pdf"
+        className="sr-only"
+        onChange={(e) => onPick(e.target.files?.[0])}
+      />
+    </label>
+  );
+}
 
 export function SetupScreen({ onPlan, onUseSample }: Props) {
   const [resume, setResume] = useState<File | null>(null);
@@ -28,17 +63,24 @@ export function SetupScreen({ onPlan, onUseSample }: Props) {
       return;
     }
     if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
-      setError({ message: `${file.name} is not a PDF.`, offerSample: false });
+      setError({
+        message: `"${file.name}" isn't a PDF. Please choose a PDF file.`,
+        offerSample: false,
+      });
       return;
     }
     if (file.size > MAX_PDF_BYTES) {
-      setError({ message: `${file.name} is larger than 10 MB.`, offerSample: false });
+      setError({ message: `"${file.name}" is bigger than 10 MB.`, offerSample: false });
       return;
     }
     set(file);
   };
 
-  const canSubmit = !!resume && (!!jdFile || jdText.trim().length > 0) && !loading;
+  const missing = !resume
+    ? "Add your resume first."
+    : !jdFile && !jdText.trim()
+      ? "Add the job description."
+      : null;
 
   const submit = async () => {
     if (!resume) {
@@ -55,7 +97,9 @@ export function SetupScreen({ onPlan, onUseSample }: Props) {
     } catch (err) {
       const apiErr = err instanceof PipelineApiError ? err : null;
       setError({
-        message: apiErr?.message ?? "Plan generation failed.",
+        message: apiErr?.serviceUnavailable
+          ? "Live interviews from your own resume aren't switched on yet. The demo interview works right now."
+          : (apiErr?.message ?? "Something went wrong while reading your files."),
         offerSample: apiErr ? apiErr.serviceUnavailable || apiErr.status >= 500 : true,
       });
     } finally {
@@ -64,87 +108,117 @@ export function SetupScreen({ onPlan, onUseSample }: Props) {
   };
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold">Set up the interview</h1>
-        <p className="mt-1 text-sm text-gray-600">
-          Upload the resume and job description. We rank the resume claims the job depends on and
-          prepare a question ladder for each one.
+    <div className="mx-auto max-w-5xl space-y-6">
+      <header className="space-y-2">
+        <h1 className="text-3xl font-black tracking-tight md:text-4xl">
+          Let's set up your interview
+        </h1>
+        <p className="text-lg text-gray-700">
+          Pick one: try the demo right away, or use your own resume.
         </p>
       </header>
 
-      <section className="space-y-4 rounded-lg border bg-white p-5">
-        <div>
-          <label htmlFor="resume" className="block text-sm font-medium">
-            Resume (PDF)
-          </label>
-          <input
-            id="resume"
-            type="file"
-            accept="application/pdf,.pdf"
-            className="mt-1 block w-full text-sm file:mr-3 file:rounded-md file:border-0 file:bg-indigo-50 file:px-3 file:py-1.5 file:text-indigo-700"
-            onChange={(e) => pickPdf(e.target.files?.[0], setResume)}
-          />
-        </div>
+      <div className="grid gap-6 lg:grid-cols-2">
+        {/* Demo */}
+        <section className="nb-card nb-bg-soft-lavender flex flex-col gap-4 p-6">
+          <span className="nb-pill self-start nb-bg-lavender">
+            <Sparkles className="h-3.5 w-3.5" /> Best for a first try
+          </span>
+          <h2 className="text-2xl font-black">Demo interview</h2>
+          <p className="text-gray-700">
+            No upload needed. You play a backend-engineer candidate and answer 8 real questions out
+            loud. Questions follow a recorded sample, so your answers aren't graded, but you'll see
+            exactly how the live interview feels.
+          </p>
+          <ul className="space-y-1 text-sm text-gray-700">
+            <li>✓ Voice conversation with follow-ups and interruptions</li>
+            <li>✓ A coding question with a real code editor</li>
+            <li>✓ Ends with a full sample report</li>
+          </ul>
+          <NbButton
+            variant="primary"
+            size="lg"
+            className="mt-auto self-start"
+            onClick={onUseSample}
+          >
+            Start the demo
+          </NbButton>
+        </section>
 
-        <div>
-          <label htmlFor="jdText" className="block text-sm font-medium">
-            Job description
-          </label>
-          <Textarea
-            id="jdText"
-            className="mt-1 min-h-[140px]"
-            placeholder="Paste the job description here, or upload a PDF below."
-            value={jdText}
-            disabled={!!jdFile}
-            onChange={(e) => setJdText(e.target.value)}
+        {/* Own resume */}
+        <section className="nb-card flex flex-col gap-4 p-6">
+          <h2 className="text-2xl font-black">Use my resume</h2>
+          <FilePicker
+            id="resume"
+            label="1. Your resume (PDF)"
+            hint="Click to choose a file"
+            file={resume}
+            onPick={(f) => pickPdf(f, setResume)}
           />
-          <div className="mt-2 flex items-center gap-3 text-sm">
-            <label htmlFor="jdFile" className="text-gray-600">
-              or JD PDF:
+          <div className="space-y-2">
+            <label htmlFor="jdText" className="block font-bold">
+              2. The job description
             </label>
-            <input
+            <textarea
+              id="jdText"
+              className="nb-input min-h-[120px]"
+              placeholder="Paste the job posting here..."
+              value={jdText}
+              disabled={!!jdFile}
+              onChange={(e) => setJdText(e.target.value)}
+            />
+            <FilePicker
               id="jdFile"
-              type="file"
-              accept="application/pdf,.pdf"
-              className="text-sm file:mr-3 file:rounded-md file:border-0 file:bg-gray-100 file:px-3 file:py-1"
-              onChange={(e) => pickPdf(e.target.files?.[0], setJdFile)}
+              label="...or upload it as a PDF"
+              hint="Optional"
+              file={jdFile}
+              onPick={(f) => pickPdf(f, setJdFile)}
             />
           </div>
-        </div>
 
-        {error && (
-          <div role="alert" className="rounded-md border border-red-200 bg-red-50 p-3 text-sm">
-            <p className="text-red-800">{error.message}</p>
-            {error.offerSample && (
-              <p className="mt-1 text-red-700">
-                You can continue with the labeled sample interview instead.
-              </p>
-            )}
-          </div>
-        )}
-
-        <div className="flex flex-wrap items-center gap-3">
-          <Button type="button" disabled={!canSubmit} onClick={submit}>
-            {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {loading ? "Reading resume and JD..." : "Generate ranked claims"}
-          </Button>
-          {loading && (
-            <span className="text-xs text-gray-500">This usually takes 10–20 seconds.</span>
+          {error && (
+            <div
+              role="alert"
+              className="rounded-xl border-2 border-[#111] nb-bg-soft-salmon p-3 text-sm"
+            >
+              <p className="font-medium">{error.message}</p>
+              {error.offerSample && (
+                <button
+                  type="button"
+                  className="nb-link mt-1 font-bold text-[#494cf3]"
+                  onClick={onUseSample}
+                >
+                  Try the demo interview instead →
+                </button>
+              )}
+            </div>
           )}
-        </div>
-      </section>
 
-      <section className="rounded-lg border border-dashed border-indigo-300 bg-indigo-50/50 p-5">
-        <h2 className="text-sm font-semibold text-indigo-900">Sample interview (fixture)</h2>
-        <p className="mt-1 text-sm text-indigo-900/80">
-          Uses a prepared backend-engineer resume and job description. Nothing you entered above is
-          sent. Questions and decisions replay the recorded sample; answers are not graded.
+          <div className="mt-auto flex flex-wrap items-center gap-3">
+            <NbButton
+              variant="secondary"
+              size="lg"
+              disabled={!!missing || loading}
+              onClick={submit}
+            >
+              {loading && <Loader2 className="h-5 w-5 animate-spin" />}
+              {loading ? "Reading your files..." : "Build my interview"}
+            </NbButton>
+            <span className="text-sm text-gray-600">
+              {loading ? "About 10–20 seconds." : missing}
+            </span>
+          </div>
+        </section>
+      </div>
+
+      <Explainer title="What happens to my files?">
+        <p>
+          We read your resume and the job description to find the claims that matter for this job,
+          for example "optimized slow queries". Each one becomes a topic with a short ladder of
+          questions, from an opening question up to "defend your choice".
         </p>
-        <Button type="button" variant="outline" className="mt-3" onClick={onUseSample}>
-          Use sample interview
-        </Button>
-      </section>
+        <p>The demo doesn't send anything you typed or uploaded here.</p>
+      </Explainer>
     </div>
   );
 }

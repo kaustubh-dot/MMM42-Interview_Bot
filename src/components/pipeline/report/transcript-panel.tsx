@@ -3,7 +3,7 @@
 import type { Citation } from "@/types/pipeline";
 import { useEffect, useRef, useState } from "react";
 import type { ClientTurn } from "../contract";
-import { RUNG_LABELS } from "../labels";
+import { FRIENDLY_RUNGS } from "../labels";
 import { ArtifactReview } from "../technical-workspace";
 
 interface Props {
@@ -19,7 +19,7 @@ function fmt(ms: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
-/** Saved transcript. The selected citation is highlighted from its exact saved offsets. */
+/** Saved transcript as a chat. The selected citation is highlighted from its exact saved offsets. */
 export function TranscriptPanel({ turns, selected, focusTurnId, artifactsOpen = false }: Props) {
   const markRef = useRef<HTMLElement>(null);
   const turnRefs = useRef(new Map<string, HTMLLIElement>());
@@ -37,17 +37,18 @@ export function TranscriptPanel({ turns, selected, focusTurnId, artifactsOpen = 
   }, [focusTurnId]);
 
   return (
-    <section aria-label="Transcript" className="rounded-lg border bg-white">
-      <header className="border-b px-4 py-2">
-        <h2 className="text-sm font-semibold">Transcript</h2>
+    <section aria-label="Transcript" className="nb-card">
+      <header className="border-b-2 border-[#111] px-5 py-3">
+        <h2 className="text-lg font-black">Transcript</h2>
         {!artifactsOpen && (
-          <p className="text-xs text-gray-500">Click a quote in a score to highlight it here.</p>
+          <p className="text-sm text-gray-600">Click a quote in a score and it lights up here.</p>
         )}
       </header>
-      <ol className="space-y-3 p-4">
+      <ol className="space-y-4 p-4 md:p-5">
         {turns.map((t) => {
           const isSel = selected?.turnId === t.id;
           const focused = focusTurnId === t.id;
+          const ai = t.speaker === "ai";
           return (
             <li
               key={t.id}
@@ -58,39 +59,44 @@ export function TranscriptPanel({ turns, selected, focusTurnId, artifactsOpen = 
                   turnRefs.current.delete(t.id);
                 }
               }}
-              className={`rounded-md p-2 text-sm transition-colors ${
-                t.speaker === "ai" ? "bg-gray-50" : "bg-white"
-              } ${focused || isSel ? "ring-2 ring-indigo-300" : ""}`}
+              className={`flex flex-col ${ai ? "items-start" : "items-end"}`}
             >
-              <div className="mb-1 flex flex-wrap items-center gap-2 text-xs text-gray-500">
-                <span className="font-mono">{t.id}</span>
-                <span className="font-medium text-gray-700">
-                  {t.speaker === "ai" ? "Interviewer" : "Candidate"}
+              <div className="mb-1 flex items-center gap-2 text-xs text-gray-600">
+                <span className="font-bold text-[#111]">
+                  {ai ? "🤖 Interviewer" : "🧑 Candidate"}
                 </span>
-                <span>{RUNG_LABELS[t.rung]}</span>
-                <span className="ml-auto font-mono">{fmt(t.startMs)}</span>
+                <span>{FRIENDLY_RUNGS[t.rung]}</span>
+                <span className="font-mono">
+                  {t.id} · {fmt(t.startMs)}
+                </span>
               </div>
-              <p className="whitespace-pre-wrap leading-relaxed">
-                {isSel && selected ? (
-                  <>
-                    {t.text.slice(0, selected.start)}
-                    <mark ref={markRef} className="rounded bg-yellow-200 px-0.5">
-                      {t.text.slice(selected.start, selected.end)}
-                    </mark>
-                    {t.text.slice(selected.end)}
-                  </>
-                ) : (
-                  t.text
-                )}
-              </p>
-              {t.artifacts?.map((a) => (
-                <SubmittedArtifact
-                  key={`${t.id}-${a.kind}`}
-                  turnId={t.id}
-                  artifact={a}
-                  defaultOpen={artifactsOpen}
-                />
-              ))}
+              <div
+                className={`max-w-[92%] rounded-2xl border-2 border-[#111] p-3 transition-shadow ${
+                  ai ? "rounded-tl-none nb-bg-soft-lavender" : "rounded-tr-none bg-white"
+                } ${focused || isSel ? "shadow-[4px_4px_0_#111]" : ""}`}
+              >
+                <p className="whitespace-pre-wrap leading-relaxed">
+                  {isSel && selected ? (
+                    <>
+                      {t.text.slice(0, selected.start)}
+                      <mark ref={markRef} className="rounded bg-[#fff3a3] px-0.5 font-medium">
+                        {t.text.slice(selected.start, selected.end)}
+                      </mark>
+                      {t.text.slice(selected.end)}
+                    </>
+                  ) : (
+                    t.text
+                  )}
+                </p>
+                {t.artifacts?.map((a) => (
+                  <SubmittedArtifact
+                    key={`${t.id}-${a.kind}`}
+                    turnId={t.id}
+                    artifact={a}
+                    defaultOpen={artifactsOpen}
+                  />
+                ))}
+              </div>
             </li>
           );
         })}
@@ -111,20 +117,20 @@ function SubmittedArtifact({
   // Mounted on demand so the report does not load Monaco/Excalidraw for every turn up front.
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="mt-2 rounded-md border border-sky-200 bg-sky-50/50">
+    <div className="mt-3 rounded-xl border-2 border-[#111] bg-[#f3f3f3]">
       <button
         type="button"
-        className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-xs"
+        className="flex w-full flex-wrap items-center gap-2 px-3 py-2 text-left text-sm"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
       >
-        <span className="font-medium text-sky-900">
-          {artifact.kind === "code" ? `Submitted code (${artifact.language})` : "Submitted drawing"}
+        <span className="font-bold">
+          {artifact.kind === "code"
+            ? `💻 Submitted code (${artifact.language})`
+            : "🖍️ Submitted drawing"}
         </span>
-        <span className="rounded bg-white px-1.5 py-0.5 text-sky-800">
-          Supporting artifact: human review. Not scored.
-        </span>
-        <span className="ml-auto text-sky-700">{open ? "Hide" : "Show"}</span>
+        <span className="nb-pill text-[11px]">Saved for a person to review · not scored</span>
+        <span className="ml-auto font-medium text-[#494cf3]">{open ? "Hide" : "Show"}</span>
       </button>
       {open && (
         <div className="p-2" data-turn={turnId}>

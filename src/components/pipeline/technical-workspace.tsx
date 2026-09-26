@@ -67,20 +67,20 @@ export const TechnicalWorkspace = forwardRef<TechnicalWorkspaceRef, TechnicalWor
     );
 
     return (
-      <section className="rounded-lg border bg-white" aria-label="Technical workspace">
-        <header className="flex flex-wrap items-center gap-2 border-b px-3 py-2 text-sm">
-          <span className="font-semibold">
-            {mode.kind === "code" ? "Code editor" : "Whiteboard"}
+      <section className="nb-card overflow-hidden" aria-label="Technical workspace">
+        <header className="flex flex-wrap items-center gap-2 border-b-2 border-[#111] nb-bg-soft-lavender px-4 py-3">
+          <span className="text-lg font-black">
+            {mode.kind === "code" ? "💻 Code editor" : "🖍️ Whiteboard"}
           </span>
-          <span className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-600">
-            Supporting artifact for human review. Only your spoken explanation is scored.
+          <span className="nb-pill text-xs">
+            Saved for a person to review · only what you say is scored
           </span>
           {mode.kind === "code" && (
-            <span className="ml-auto text-xs text-gray-500">No code is run.</span>
+            <span className="ml-auto text-sm text-gray-700">Edit the code. Nothing is run.</span>
           )}
         </header>
         {mode.kind === "whiteboard" && (
-          <p className="border-b bg-indigo-50 px-3 py-2 text-sm text-indigo-900">{mode.prompt}</p>
+          <p className="border-b-2 border-[#111] bg-white px-4 py-3 font-medium">{mode.prompt}</p>
         )}
         <div className={disabled ? "pointer-events-none opacity-60" : undefined}>
           {mode.kind === "code" ? (
@@ -119,14 +119,14 @@ export function ArtifactReview({ artifact }: { artifact: AnswerArtifact }) {
   const scene = parseScene(artifact.sceneJson);
   if (!scene) {
     return (
-      <p className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+      <p className="rounded-xl border-2 border-[#111] nb-bg-soft-salmon p-3 text-sm">
         The saved drawing could not be read.
       </p>
     );
   }
   if (scene.elements.length === 0) {
     return (
-      <p className="rounded border bg-gray-50 p-3 text-sm text-gray-600">
+      <p className="rounded-xl border-2 border-[#111] bg-[#f3f3f3] p-3 text-sm">
         The candidate submitted an empty whiteboard.
       </p>
     );

@@ -1,12 +1,10 @@
 "use client";
 
 import { TabSwitchWarning } from "@/components/call/tabSwitchPrevention";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import { useBrowserIntegrity } from "@/hooks/use-browser-integrity";
 import { useInterviewSpeech } from "@/hooks/use-interview-speech";
 import type { Turn } from "@/types/pipeline";
-import { Loader2, Mic, MicOff, RotateCcw, Volume2 } from "lucide-react";
+import { Keyboard, Loader2, Mic, MicOff, RotateCcw, SkipForward, Volume2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PipelineApiError, newRequestId } from "./api-client";
 import {
@@ -20,11 +18,11 @@ import {
   type TurnReply,
   workspaceForQuestion,
 } from "./contract";
-import { DecisionLog } from "./decision-log";
 import { clearDraft, loadDraft, saveDraft } from "./draft-store";
 import type { InterviewDriver } from "./interview-driver";
-import { RUNG_LABELS } from "./labels";
+import { FRIENDLY_REASONS, FRIENDLY_RUNGS } from "./labels";
 import { TechnicalWorkspace, type TechnicalWorkspaceRef } from "./technical-workspace";
+import { NbButton } from "./ui";
 
 interface Props {
   driver: InterviewDriver;
@@ -38,17 +36,45 @@ type SubmitState =
   | { kind: "submitting" }
   | { kind: "error"; message: string; stale: boolean; sendFailed: boolean };
 
+// ── Live-conversation timing ──────────────────────────────────────────
+// A pause this long after you have spoken is treated as the end of your answer.
+const SILENCE_SEND_MS = 3000;
+// The "sounds like you're done" countdown appears after this much silence.
+const SILENCE_WARN_MS = 1200;
+// The interviewer politely cuts in once a spoken answer runs this long (from your first word)...
+const ANSWER_LIMIT_MS = 75_000;
+// ...or this many words.
+const ANSWER_WORD_LIMIT = 220;
+// Code/whiteboard questions: silence is normal while working, so no auto-send, longer limit.
+const WORKSPACE_LIMIT_MS = 240_000;
+const WRAP_UP_WARNING_MS = 15_000;
+// If you haven't said anything this long after the question, the interviewer checks in once.
+const NUDGE_AFTER_MS = 12_000;
+
+const INTERJECTIONS = [
+  "Thanks, let me stop you there. That's helpful.",
+  "Great, I've got enough on that one. Let's keep moving.",
+  "Let me jump in there so we have time for the rest.",
+];
+const NUDGE_LINE =
+  "Take your time. Start whenever you're ready, or press Repeat if you'd like to hear the question again.";
+
 const utf8Bytes = (s: string) => new TextEncoder().encode(s).length;
+const wordCount = (s: string) => (s.trim() ? s.trim().split(/\s+/).length : 0);
+const mmss = (ms: number) => {
+  const s = Math.max(0, Math.round(ms / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+};
 
 function artifactTooLarge(artifact: AnswerArtifact | null): string | null {
   if (!artifact) {
     return null;
   }
   if (artifact.kind === "code" && utf8Bytes(artifact.code) > MAX_CODE_BYTES) {
-    return "The code is larger than 100 KB. Shorten it before submitting; your draft is kept.";
+    return "Your code is larger than 100 KB. Shorten it and send again; nothing is lost.";
   }
   if (artifact.kind === "whiteboard" && utf8Bytes(artifact.sceneJson) > MAX_SCENE_BYTES) {
-    return "The drawing is larger than 500 KB. Remove some elements before submitting; your draft is kept.";
+    return "Your drawing is larger than 500 KB. Remove a few shapes and send again; nothing is lost.";
   }
   return null;
 }
@@ -62,7 +88,9 @@ export function InterviewScreen({ driver, plan, faceSignals, onFinished }: Props
   const [draftNotice, setDraftNotice] = useState<string | null>(null);
   const [storageWarning, setStorageWarning] = useState<string | null>(null);
   const [submitState, setSubmitState] = useState<SubmitState>({ kind: "idle" });
-  const [micWanted, setMicWanted] = useState(true);
+  const [inputMode, setInputMode] = useState<"voice" | "type">("voice");
+  const [interjection, setInterjection] = useState<string | null>(null);
+  const [now, setNow] = useState(0);
 
   const workspaceRef = useRef<TechnicalWorkspaceRef>(null);
   const latestArtifactRef = useRef<AnswerArtifact | null>(null);
@@ -71,6 +99,10 @@ export function InterviewScreen({ driver, plan, faceSignals, onFinished }: Props
   // One request ID per question until the server accepts it, so a retry is deduplicated.
   const requestIdRef = useRef<string>(newRequestId());
   const spokenRef = useRef<string | null>(null);
+  const submittingRef = useRef(false);
+  const interruptingRef = useRef(false);
+  const listenStartRef = useRef<number | null>(null);
+  const nudgedRef = useRef(false);
 
   const question: Turn | null = reply?.nextQuestion ?? null;
   const workspace = question ? workspaceForQuestion(plan, question) : null;
@@ -91,6 +123,15 @@ export function InterviewScreen({ driver, plan, faceSignals, onFinished }: Props
   const speech = useInterviewSpeech({
     onFinalChunk: (text) => setTranscript((prev) => (prev ? `${prev} ${text}` : text)),
   });
+  const mode: "voice" | "type" = speech.supported.recognition ? inputMode : "type";
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
+  const interimRef = useRef("");
+  interimRef.current = speech.interim;
+
+  /** What the candidate has said so far, including words still being recognized. */
+  const currentAnswer = () =>
+    [transcriptRef.current.trim(), interimRef.current.trim()].filter(Boolean).join(" ");
 
   // ── Start ────────────────────────────────────────────────────────
   const start = useCallback(async () => {
@@ -123,7 +164,14 @@ export function InterviewScreen({ driver, plan, faceSignals, onFinished }: Props
     [attemptId, question, finished],
   );
 
-  // New question: restore this question's draft (drafts never leak across questions), speak it.
+  const beginListening = useCallback(() => {
+    listenStartRef.current = performance.now();
+    if (modeRef.current === "voice") {
+      speech.startListening();
+    }
+  }, [speech.startListening]);
+
+  // New question: restore this question's draft, read it aloud, then listen.
   // biome-ignore lint/correctness/useExhaustiveDependencies: runs per question ID
   useEffect(() => {
     if (!question || finished) {
@@ -132,20 +180,19 @@ export function InterviewScreen({ driver, plan, faceSignals, onFinished }: Props
     const draft = questionDraft;
     setTranscript(draft?.transcript ?? "");
     latestArtifactRef.current = draft?.artifact ?? null;
-    setDraftNotice(draft ? "Restored your unsent draft for this question." : null);
+    setDraftNotice(draft ? "We restored what you had said before the page reloaded." : null);
     setSubmitState({ kind: "idle" });
+    setInterjection(null);
+    nudgedRef.current = false;
+    listenStartRef.current = null;
     speech.resetAnswerTiming();
     if (spokenRef.current !== question.id) {
       spokenRef.current = question.id;
-      speech.speak(question.text).then(() => {
-        if (micWanted && speech.supported.recognition) {
-          speech.startListening();
-        }
-      });
+      speech.speak(question.text).then(beginListening);
     }
   }, [question?.id]);
 
-  // Final question reached: stop the microphone.
+  // Last question reached: stop the microphone and say goodbye.
   // biome-ignore lint/correctness/useExhaustiveDependencies: react to finish only
   useEffect(() => {
     if (finished && reply) {
@@ -166,7 +213,7 @@ export function InterviewScreen({ driver, plan, faceSignals, onFinished }: Props
 
   // ── Submit ───────────────────────────────────────────────────────
   const submit = async () => {
-    if (!question || !startedAtPerf || submitState.kind === "submitting") {
+    if (!question || !startedAtPerf || submittingRef.current) {
       return;
     }
     // Capture the editor/canvas state now; never wait for the debounced autosave.
@@ -174,8 +221,8 @@ export function InterviewScreen({ driver, plan, faceSignals, onFinished }: Props
       ? (workspaceRef.current?.capture() ?? latestArtifactRef.current)
       : null;
     latestArtifactRef.current = artifact;
-    const text = transcriptRef.current.trim();
-    persistDraft(transcriptRef.current, artifact);
+    const text = currentAnswer();
+    persistDraft(text, artifact);
 
     const tooLarge = artifactTooLarge(artifact);
     if (tooLarge) {
@@ -185,15 +232,16 @@ export function InterviewScreen({ driver, plan, faceSignals, onFinished }: Props
     if (!text) {
       setSubmitState({
         kind: "error",
-        message:
-          "Say or type your answer before submitting. Only the spoken explanation is scored.",
+        message: "We didn't catch an answer yet. Say something (or type it), then send.",
         stale: false,
         sendFailed: false,
       });
       return;
     }
 
+    submittingRef.current = true;
     speech.stopListening();
+    setTranscript(text);
     setSubmitState({ kind: "submitting" });
     const endMs = Math.round(performance.now() - startedAtPerf);
     const startMs =
@@ -226,34 +274,119 @@ export function InterviewScreen({ driver, plan, faceSignals, onFinished }: Props
         stale,
         sendFailed: true,
         message: stale
-          ? "The interview has moved on from this question (it may have been answered in another tab). Reload to continue from the last saved answer; your draft is kept."
-          : `${apiErr?.message ?? (err instanceof Error ? err.message : "Submit failed.")} Your answer and ${workspace ? "workspace are" : "draft is"} kept. Retry when ready.`,
+          ? "This question was already answered (maybe in another tab). Reload to continue; your words are saved."
+          : `${apiErr?.message ?? (err instanceof Error ? err.message : "Sending failed.")} Your answer${workspace ? " and work" : ""} are saved here. Press "Try sending again".`,
       });
-      if (micWanted) {
-        speech.startListening();
-      }
+    } finally {
+      submittingRef.current = false;
+      interruptingRef.current = false;
     }
+  };
+  const submitRef = useRef(submit);
+  submitRef.current = submit;
+
+  /** The interviewer cuts in (answer too long), says a short line, then moves on. */
+  const interrupt = async () => {
+    if (interruptingRef.current || submittingRef.current) {
+      return;
+    }
+    interruptingRef.current = true;
+    const line = INTERJECTIONS[Math.floor(Math.random() * INTERJECTIONS.length)];
+    setInterjection(line);
+    speech.stopListening();
+    await speech.speak(line);
+    await submitRef.current();
+  };
+  const interruptRef = useRef(interrupt);
+  interruptRef.current = interrupt;
+
+  // ── Live loop: auto-send on pause, cut in when long, nudge when silent ──
+  const autoActive =
+    !!question &&
+    !finished &&
+    !!startedAtPerf &&
+    submitState.kind !== "submitting" &&
+    submitState.kind !== "error";
+  const tickRef = useRef<() => void>(() => {});
+  tickRef.current = () => {
+    const t = performance.now();
+    setNow(t);
+    if (!autoActive || interruptingRef.current || submittingRef.current || mode !== "voice") {
+      return;
+    }
+    const answer = currentAnswer();
+    const firstWord = speech.firstSpeechAtPerf;
+    const limit = workspace ? WORKSPACE_LIMIT_MS : ANSWER_LIMIT_MS;
+    if (firstWord !== null && t - firstWord >= limit) {
+      interruptRef.current();
+      return;
+    }
+    if (!workspace && wordCount(answer) >= ANSWER_WORD_LIMIT) {
+      interruptRef.current();
+      return;
+    }
+    if (speech.status !== "listening") {
+      return;
+    }
+    const heard = speech.lastHeardAt();
+    if (!workspace && heard !== null && answer && t - heard >= SILENCE_SEND_MS) {
+      submitRef.current();
+      return;
+    }
+    const listenedFrom = listenStartRef.current;
+    if (
+      heard === null &&
+      listenedFrom !== null &&
+      !nudgedRef.current &&
+      t - listenedFrom >= NUDGE_AFTER_MS
+    ) {
+      nudgedRef.current = true;
+      speech.speak(NUDGE_LINE).then(() => {
+        listenStartRef.current = performance.now();
+      });
+    }
+  };
+  useEffect(() => {
+    const id = setInterval(() => tickRef.current(), 200);
+    return () => clearInterval(id);
+  }, []);
+
+  const skipQuestionReading = () => speech.cancelSpeech();
+  const repeatQuestion = () => {
+    if (question) {
+      speech.speak(question.text).then(() => {
+        listenStartRef.current = performance.now();
+      });
+    }
+  };
+  const switchToTyping = () => {
+    speech.stopListening();
+    setTranscript(currentAnswer());
+    setInputMode("type");
+  };
+  const switchToVoice = () => {
+    setInputMode("voice");
+    setSubmitState({ kind: "idle" });
+    listenStartRef.current = performance.now();
+    speech.startListening();
   };
 
   // ── Render ───────────────────────────────────────────────────────
   if (startError) {
     return (
-      <div
-        role="alert"
-        className="mx-auto max-w-xl rounded-lg border border-red-200 bg-red-50 p-5 text-sm"
-      >
-        <p className="font-medium text-red-800">Could not start the interview.</p>
-        <p className="mt-1 text-red-700">{startError}</p>
-        <Button type="button" className="mt-3" onClick={start}>
-          Retry
-        </Button>
+      <div role="alert" className="nb-card mx-auto max-w-xl space-y-3 p-6">
+        <p className="text-lg font-black">We couldn't start the interview.</p>
+        <p className="text-gray-700">{startError}</p>
+        <NbButton variant="primary" onClick={start}>
+          Try again
+        </NbButton>
       </div>
     );
   }
   if (!reply || !question) {
     return (
-      <div className="flex items-center justify-center gap-2 p-10 text-sm text-gray-600">
-        <Loader2 className="h-4 w-4 animate-spin" /> Preparing the first question...
+      <div className="nb-card mx-auto flex max-w-xl items-center gap-3 p-6">
+        <Loader2 className="h-5 w-5 animate-spin" /> Getting your first question ready...
       </div>
     );
   }
@@ -261,29 +394,162 @@ export function InterviewScreen({ driver, plan, faceSignals, onFinished }: Props
   const claim = plan.claims.find((c) => c.id === question.claimId);
   const questionNumber = reply.record.turns.filter((t) => t.speaker === "ai").length;
   const submitting = submitState.kind === "submitting";
+  const heard = speech.lastHeardAt();
+  const answerNow = [transcript.trim(), speech.interim.trim()].filter(Boolean).join(" ");
+  const silenceMs = heard !== null && speech.status === "listening" ? now - heard : 0;
+  const finishing =
+    !workspace && autoActive && mode === "voice" && !!answerNow && silenceMs >= SILENCE_WARN_MS;
+  const limit = workspace ? WORKSPACE_LIMIT_MS : ANSWER_LIMIT_MS;
+  const elapsed = speech.firstSpeechAtPerf !== null ? now - speech.firstSpeechAtPerf : 0;
+  const remaining = limit - elapsed;
+  const lastDecision = reply.decision;
+
+  let status: { tone: string; icon: React.ReactNode; text: string };
+  if (finished) {
+    status = {
+      tone: "bg-emerald-100",
+      icon: "🎉",
+      text: "That's the end of the interview. Nice work!",
+    };
+  } else if (submitting) {
+    status = {
+      tone: "nb-bg-soft-lavender",
+      icon: <Loader2 className="h-5 w-5 animate-spin" />,
+      text: "Sending your answer...",
+    };
+  } else if (interjection) {
+    status = {
+      tone: "nb-bg-salmon",
+      icon: "✋",
+      text: `The interviewer cut in: "${interjection}"`,
+    };
+  } else if (speech.status === "speaking") {
+    status = {
+      tone: "nb-bg-soft-lavender",
+      icon: "🗣️",
+      text: "The interviewer is talking. Listen, or skip to answer now.",
+    };
+  } else if (mode === "type") {
+    status = {
+      tone: "bg-white",
+      icon: <Keyboard className="h-5 w-5" />,
+      text: "Typing mode: write your answer, then press Send.",
+    };
+  } else if (speech.status === "listening" && workspace) {
+    status = {
+      tone: "nb-bg-soft-salmon",
+      icon: "🧑‍💻",
+      text: 'Work in the editor and talk through your thinking. Press "I\'m done" when finished.',
+    };
+  } else if (finishing) {
+    status = {
+      tone: "nb-bg-soft-salmon",
+      icon: "⏳",
+      text: "Sounds like you're done. Sending soon; keep talking to continue.",
+    };
+  } else if (speech.status === "listening" && answerNow) {
+    status = {
+      tone: "nb-bg-soft-salmon",
+      icon: "🎙️",
+      text: `Listening... pause for ${SILENCE_SEND_MS / 1000} seconds when you're finished.`,
+    };
+  } else if (speech.status === "listening") {
+    status = {
+      tone: "nb-bg-soft-salmon",
+      icon: "🎙️",
+      text: "Your turn. Start talking whenever you're ready.",
+    };
+  } else {
+    status = {
+      tone: "bg-white",
+      icon: <MicOff className="h-5 w-5" />,
+      text: "The microphone is paused.",
+    };
+  }
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
       <TabSwitchWarning open={integrity.showTabNotice} onUnderstand={integrity.dismissTabNotice} />
 
-      <div className="min-w-0 space-y-4">
-        <section className="rounded-lg border bg-white p-4" aria-live="polite">
-          <div className="flex flex-wrap items-center gap-2 text-xs text-gray-600">
-            <span className="font-medium">
+      <div className="min-w-0 space-y-5">
+        {/* Progress */}
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <span className="font-black">
               Question {questionNumber} of up to {plan.maxQuestions}
             </span>
-            {claim && <span className="rounded bg-gray-100 px-2 py-0.5">{claim.skillArea}</span>}
-            <span className="rounded bg-gray-100 px-2 py-0.5">{RUNG_LABELS[question.rung]}</span>
-            <button
-              type="button"
-              className="ml-auto inline-flex items-center gap-1 text-indigo-700 hover:underline"
-              onClick={() => speech.speak(question.text)}
-              disabled={!speech.supported.synthesis}
-            >
-              <Volume2 className="h-3.5 w-3.5" /> Replay question
-            </button>
+            {claim && <span className="nb-pill">{claim.skillArea}</span>}
+            <span className="nb-pill nb-bg-soft-lavender">{FRIENDLY_RUNGS[question.rung]}</span>
           </div>
-          <p className="mt-2 text-lg leading-snug">{question.text}</p>
+          <div className="h-3 w-full overflow-hidden rounded-full border-2 border-[#111] bg-white">
+            <div
+              className="h-full nb-bg-lavender transition-all"
+              style={{ width: `${Math.min(100, (questionNumber / plan.maxQuestions) * 100)}%` }}
+            />
+          </div>
+        </div>
+
+        {/* Interviewer stage */}
+        <section className="nb-card space-y-4 p-5 md:p-6" aria-live="polite">
+          <div className="flex items-center gap-3">
+            <span
+              className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-full border-2 border-[#111] nb-bg-lavender text-2xl ${
+                speech.status === "speaking" ? "nb-speaking" : ""
+              }`}
+              aria-hidden="true"
+            >
+              🤖
+            </span>
+            <div className="min-w-0">
+              <p className="font-black">AI interviewer</p>
+              <p className="text-sm text-gray-600">{FRIENDLY_REASONS[lastDecision.reason].title}</p>
+            </div>
+            <div className="ml-auto flex flex-wrap gap-2">
+              {speech.status === "speaking" && !finished ? (
+                <NbButton size="sm" variant="secondary" onClick={skipQuestionReading}>
+                  <SkipForward className="h-4 w-4" /> Skip to my answer
+                </NbButton>
+              ) : (
+                !finished && (
+                  <NbButton
+                    size="sm"
+                    onClick={repeatQuestion}
+                    disabled={!speech.supported.synthesis || submitting}
+                  >
+                    <Volume2 className="h-4 w-4" /> Repeat
+                  </NbButton>
+                )
+              )}
+            </div>
+          </div>
+          <p className="text-xl font-medium leading-snug md:text-2xl">{question.text}</p>
+          <div
+            className={`flex items-center gap-3 rounded-xl border-2 border-[#111] px-4 py-3 text-sm font-medium ${status.tone}`}
+          >
+            <span className="flex h-6 w-6 items-center justify-center">{status.icon}</span>
+            <span>{status.text}</span>
+            {speech.status === "listening" && !finishing && (
+              <span className="nb-eq ml-auto text-[#ff697c]" aria-hidden="true">
+                <span />
+                <span />
+                <span />
+                <span />
+              </span>
+            )}
+          </div>
+          {finishing && (
+            <div
+              className="h-2 w-full overflow-hidden rounded-full border border-[#111] bg-white"
+              aria-hidden="true"
+            >
+              <div
+                className="h-full bg-[#ff697c]"
+                style={{
+                  width: `${Math.min(100, ((silenceMs - SILENCE_WARN_MS) / (SILENCE_SEND_MS - SILENCE_WARN_MS)) * 100)}%`,
+                }}
+              />
+            </div>
+          )}
         </section>
 
         {workspace && !finished && (
@@ -301,140 +567,157 @@ export function InterviewScreen({ driver, plan, faceSignals, onFinished }: Props
         )}
 
         {!finished && (
-          <section className="space-y-3 rounded-lg border bg-white p-4" aria-label="Your answer">
+          <section className="nb-card space-y-4 p-5 md:p-6" aria-label="Your answer">
             <div className="flex flex-wrap items-center gap-2">
-              {speech.supported.recognition ? (
-                speech.status === "listening" ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setMicWanted(false);
-                      speech.stopListening();
-                    }}
-                  >
-                    <MicOff className="mr-1 h-4 w-4" /> Stop microphone
-                  </Button>
-                ) : (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={speech.status === "speaking" || submitting}
-                    onClick={() => {
-                      setMicWanted(true);
-                      speech.startListening();
-                    }}
-                  >
-                    <Mic className="mr-1 h-4 w-4" />{" "}
-                    {speech.error ? "Retry microphone" : "Start microphone"}
-                  </Button>
-                )
-              ) : (
-                <span className="text-xs text-amber-800">
-                  Voice input needs Chrome. Type your answer below.
-                </span>
-              )}
-              <span className="text-xs text-gray-500" aria-live="polite">
-                {speech.status === "speaking" && "Reading the question (microphone paused)..."}
-                {speech.status === "listening" && (
-                  <span className="inline-flex items-center gap-1 text-red-600">
-                    <span className="h-2 w-2 animate-pulse rounded-full bg-red-600" /> Listening
-                  </span>
-                )}
-              </span>
-              {driver.sampleAnswerFor && (
-                <button
-                  type="button"
-                  className="ml-auto text-xs text-indigo-700 hover:underline"
-                  onClick={() => {
-                    const sample = driver.sampleAnswerFor?.(question.id);
-                    if (sample) {
-                      speech.markFirstSpeech();
-                      setTranscript(sample);
-                    }
-                  }}
+              <h2 className="text-lg font-black">Your answer</h2>
+              {speech.firstSpeechAtPerf !== null && mode === "voice" && (
+                <span
+                  className={`nb-pill ml-auto ${remaining <= WRAP_UP_WARNING_MS ? "nb-bg-salmon" : ""}`}
                 >
-                  Fill with the sample answer
-                </button>
+                  {remaining <= WRAP_UP_WARNING_MS
+                    ? `Wrap up: ${mmss(remaining)} left`
+                    : `${mmss(elapsed)} / ${mmss(limit)}`}
+                </span>
               )}
             </div>
 
-            {speech.error && (
-              <p
-                role="alert"
-                className="rounded-md border border-amber-200 bg-amber-50 p-2 text-sm text-amber-900"
-              >
-                {speech.error.message}
-              </p>
+            {mode === "voice" ? (
+              <div className="min-h-[96px] rounded-xl bg-[#f3f3f3] p-4 text-base leading-relaxed">
+                {transcript || speech.interim ? (
+                  <>
+                    {transcript} <span className="text-gray-500">{speech.interim}</span>
+                  </>
+                ) : (
+                  <span className="text-gray-500">Your words will appear here as you speak.</span>
+                )}
+              </div>
+            ) : (
+              <>
+                <label htmlFor="answer" className="sr-only">
+                  Your answer
+                </label>
+                <textarea
+                  id="answer"
+                  className="nb-input min-h-[140px]"
+                  placeholder="Type your answer here."
+                  value={transcript}
+                  disabled={submitting}
+                  onChange={(e) => {
+                    speech.markFirstSpeech();
+                    setTranscript(e.target.value);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                      submit();
+                    }
+                  }}
+                />
+              </>
             )}
-            {draftNotice && <p className="text-xs text-gray-600">{draftNotice}</p>}
+
+            {speech.error && (
+              <div
+                role="alert"
+                className="rounded-xl border-2 border-[#111] nb-bg-soft-salmon p-3 text-sm"
+              >
+                <p>{speech.error.message}</p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <NbButton size="sm" onClick={switchToVoice}>
+                    <Mic className="h-4 w-4" /> Try the microphone again
+                  </NbButton>
+                  <NbButton size="sm" onClick={switchToTyping}>
+                    <Keyboard className="h-4 w-4" /> Type instead
+                  </NbButton>
+                </div>
+              </div>
+            )}
+            {draftNotice && <p className="text-sm text-gray-600">{draftNotice}</p>}
             {storageWarning && (
-              <p role="alert" className="text-xs text-amber-800">
+              <p role="alert" className="text-sm text-[#b4232f]">
                 {storageWarning}
               </p>
             )}
-
-            <label htmlFor="answer" className="sr-only">
-              Your answer
-            </label>
-            <Textarea
-              id="answer"
-              className="min-h-[120px]"
-              placeholder="Your spoken answer appears here. You can correct it or type."
-              value={transcript}
-              disabled={submitting}
-              onChange={(e) => {
-                speech.markFirstSpeech();
-                setTranscript(e.target.value);
-              }}
-            />
-            {speech.interim && <p className="text-sm italic text-gray-500">{speech.interim}</p>}
-
             {submitState.kind === "error" && (
               <div
                 role="alert"
-                className="rounded-md border border-red-200 bg-red-50 p-2 text-sm text-red-800"
+                className="rounded-xl border-2 border-[#111] nb-bg-soft-salmon p-3 text-sm"
               >
-                {submitState.message}
+                <p>{submitState.message}</p>
                 {submitState.stale && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="ml-2"
-                    onClick={() => window.location.reload()}
-                  >
-                    <RotateCcw className="mr-1 h-3.5 w-3.5" /> Reload
-                  </Button>
+                  <NbButton size="sm" className="mt-2" onClick={() => window.location.reload()}>
+                    <RotateCcw className="h-4 w-4" /> Reload
+                  </NbButton>
                 )}
               </div>
             )}
 
-            <div className="flex items-center gap-3">
-              <Button type="button" onClick={submit} disabled={submitting}>
-                {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                {submitting
-                  ? "Submitting..."
-                  : submitState.kind === "error" && submitState.sendFailed
-                    ? "Retry submit"
-                    : "Submit answer"}
-              </Button>
-              <span className="text-xs text-gray-500">
-                {workspace
-                  ? "Submits your answer and the current workspace."
-                  : "Submits your answer."}
-              </span>
+            <div className="flex flex-wrap items-center gap-3">
+              {mode === "voice" ? (
+                <>
+                  <NbButton
+                    variant={workspace || submitState.kind === "error" ? "primary" : "default"}
+                    onClick={() => submit()}
+                    disabled={submitting}
+                  >
+                    {submitState.kind === "error" && submitState.sendFailed
+                      ? "Try sending again"
+                      : "I'm done, send now"}
+                  </NbButton>
+                  {speech.status === "listening" ? (
+                    <NbButton size="sm" onClick={() => speech.stopListening()}>
+                      <MicOff className="h-4 w-4" /> Pause mic
+                    </NbButton>
+                  ) : (
+                    speech.status !== "speaking" && (
+                      <NbButton size="sm" onClick={switchToVoice} disabled={submitting}>
+                        <Mic className="h-4 w-4" /> Resume mic
+                      </NbButton>
+                    )
+                  )}
+                  <NbButton size="sm" onClick={switchToTyping} disabled={submitting}>
+                    <Keyboard className="h-4 w-4" /> Type instead
+                  </NbButton>
+                </>
+              ) : (
+                <>
+                  <NbButton variant="primary" onClick={() => submit()} disabled={submitting}>
+                    {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
+                    {submitState.kind === "error" && submitState.sendFailed
+                      ? "Try sending again"
+                      : "Send answer"}
+                  </NbButton>
+                  {speech.supported.recognition && (
+                    <NbButton size="sm" onClick={switchToVoice} disabled={submitting}>
+                      <Mic className="h-4 w-4" /> Use my voice
+                    </NbButton>
+                  )}
+                </>
+              )}
+              {driver.sampleAnswerFor && (
+                <button
+                  type="button"
+                  className="nb-link ml-auto text-sm font-medium text-[#494cf3] underline-offset-4 hover:underline"
+                  disabled={submitting}
+                  onClick={() => {
+                    const sample = driver.sampleAnswerFor?.(question.id);
+                    if (sample) {
+                      speech.stopListening();
+                      speech.markFirstSpeech();
+                      setTranscript(sample);
+                      setTimeout(() => submitRef.current(), 900);
+                    }
+                  }}
+                >
+                  Answer for me (sample answer)
+                </button>
+              )}
             </div>
           </section>
         )}
       </div>
 
-      <aside className="flex min-w-0 flex-col gap-4 lg:h-[calc(100vh-140px)]">
-        <div className="min-h-[240px] flex-1">
-          <DecisionLog decisions={reply.record.decisions} plan={plan} />
-        </div>
+      <aside className="flex min-w-0 flex-col gap-5">
+        <WhyThisQuestion reply={reply} plan={plan} />
         <MonitoringStatus
           tabBlurs={integrity.tabBlurCount}
           pastes={integrity.pasteCount}
@@ -443,6 +726,50 @@ export function InterviewScreen({ driver, plan, faceSignals, onFinished }: Props
         <TranscriptHistory turns={reply.record.turns} currentId={question.id} />
       </aside>
     </div>
+  );
+}
+
+/** Plain-language decision log: why the interviewer chose each question. */
+function WhyThisQuestion({ reply, plan }: { reply: TurnReply; plan: ClientInterviewPlan }) {
+  const decisions = reply.record.decisions;
+  const latest = reply.decision;
+  const friendly = FRIENDLY_REASONS[latest.reason];
+  const skill = (claimId: string) =>
+    plan.claims.find((c) => c.id === claimId)?.skillArea ?? claimId;
+  return (
+    <section aria-label="Decision log" className="nb-card space-y-3 p-4">
+      <h2 className="font-black">Why this question?</h2>
+      <div className="rounded-xl border-2 border-[#111] nb-bg-soft-lavender p-3">
+        <p className="font-bold">{friendly.title}</p>
+        <p className="mt-1 text-sm text-gray-700">{friendly.detail}</p>
+        <p className="mt-2 font-mono text-[11px] text-gray-500">rule: {latest.reason}</p>
+      </div>
+      <details className="text-sm">
+        <summary className="cursor-pointer font-bold">
+          Every decision so far ({decisions.length})
+        </summary>
+        <ol className="mt-2 space-y-2">
+          {decisions.map((d) => (
+            <li key={d.turnId} className="border-l-4 border-[#b6b7fd] pl-2">
+              <p className="font-medium">{FRIENDLY_REASONS[d.reason].title}</p>
+              <p className="text-xs text-gray-600">
+                {skill(d.claimId)} · {FRIENDLY_RUNGS[d.toRung]}
+                {d.lastGrade !== null && ` · last answer ${d.lastGrade}/3`}
+              </p>
+              <p className="font-mono text-[11px] text-gray-500">{d.reason}</p>
+            </li>
+          ))}
+        </ol>
+      </details>
+      <details className="text-sm">
+        <summary className="cursor-pointer font-bold">The rule, in one sentence</summary>
+        <p className="mt-1 text-gray-700">
+          Good answer (2+ out of 3)? One level deeper. Struggling (1 or less)? Back to basics, once
+          per topic. After 4 questions on a topic, or 2 tough answers in a row, we move to the next
+          topic.
+        </p>
+      </details>
+    </section>
   );
 }
 
@@ -456,11 +783,9 @@ function MonitoringStatus({
   faceSignals: FaceSignalAvailability;
 }) {
   return (
-    <section
-      className="rounded-lg border bg-white p-3 text-xs text-gray-700"
-      aria-label="Monitoring"
-    >
-      <h2 className="mb-1 font-semibold">Monitoring (for human review only)</h2>
+    <section className="nb-card flat space-y-1 p-4 text-sm" aria-label="Monitoring">
+      <h2 className="font-black">What we notice</h2>
+      <p className="text-gray-600">For a person to review later. It never changes your score.</p>
       <p>
         Tab switches: {tabBlurs} · Pastes: {pastes} · Face signals:{" "}
         {faceSignals.available
@@ -474,19 +799,16 @@ function MonitoringStatus({
 function TranscriptHistory({ turns, currentId }: { turns: ClientTurn[]; currentId: string }) {
   const past = turns.filter((t) => t.id !== currentId);
   return (
-    <details className="rounded-lg border bg-white p-3 text-xs">
-      <summary className="cursor-pointer font-semibold">
-        Transcript so far ({past.length} turns)
-      </summary>
-      <ol className="mt-2 max-h-60 space-y-2 overflow-y-auto">
+    <details className="nb-card flat p-4 text-sm">
+      <summary className="cursor-pointer font-black">Conversation so far ({past.length})</summary>
+      <ol className="mt-2 max-h-72 space-y-2 overflow-y-auto">
         {past.map((t) => (
           <li key={t.id}>
-            <span className="font-mono text-gray-500">{t.id}</span>{" "}
-            <span className="font-medium">{t.speaker === "ai" ? "Interviewer" : "You"}:</span>{" "}
+            <span className="font-bold">{t.speaker === "ai" ? "Interviewer" : "You"}:</span>{" "}
             {t.text}
             {t.artifacts?.length ? (
-              <span className="ml-1 rounded bg-sky-50 px-1 text-sky-800">
-                + {t.artifacts[0].kind === "code" ? "code" : "drawing"} submitted
+              <span className="nb-pill ml-1 text-[11px]">
+                + {t.artifacts[0].kind === "code" ? "code" : "drawing"}
               </span>
             ) : null}
           </li>

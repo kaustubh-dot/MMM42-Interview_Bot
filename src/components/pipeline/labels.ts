@@ -1,23 +1,4 @@
-import type { ConcernLevel, Grade, ReasonCode, Rung } from "@/types/pipeline";
-
-export const REASON_LABELS: Record<ReasonCode, string> = {
-  OPENING_TOP_RANKED_CLAIM: "Opening on the top-ranked claim",
-  STRONG_DEEPEN: "Strong answer (grade ≥2): climb one rung",
-  WEAK_FUNDAMENTAL: "Weak answer (≤1): drop to a fundamental question (once per area)",
-  AREA_BUDGET_EXHAUSTED: "4 questions asked in this area: move to the next claim",
-  REPEATED_WEAK_MOVE_ON: "2 weak answers in a row: move to the next claim",
-  LADDER_COMPLETE_NEXT_CLAIM: "Ladder complete: move to the next claim",
-  NEXT_RANKED_CLAIM: "Move to the next highest-ranked claim",
-  TIME_UP: "Question limit reached: interview ends",
-};
-
-export const RUNG_LABELS: Record<Rung, string> = {
-  fundamental: "Fundamental",
-  initial: "Initial",
-  termFollowUp: "Term follow-up",
-  scenarioTwist: "Scenario twist",
-  whyDefense: "Why-defense",
-};
+import type { Grade, ReasonCode, Rung } from "@/types/pipeline";
 
 export const GRADE_LABELS: Record<Grade, string> = {
   0: "No evidence",
@@ -26,15 +7,52 @@ export const GRADE_LABELS: Record<Grade, string> = {
   3: "Deep",
 };
 
-export const SELECTION_RULE =
-  "A strong answer (grade ≥2) climbs one rung: initial → term follow-up → scenario twist → why-defense. A weak answer (≤1) drops to a fundamental question, once per area. After 4 questions in an area, or 2 weak answers in a row, we move to the next highest-ranked claim.";
-
-export const CONCERN_STYLES: Record<ConcernLevel, string> = {
-  Low: "bg-emerald-50 text-emerald-800 border-emerald-200",
-  Medium: "bg-amber-50 text-amber-900 border-amber-200",
-  High: "bg-orange-100 text-orange-900 border-orange-300",
-};
-
 export function priorityScore(jdWeight: number, specificity: number): number {
   return jdWeight * (1 - specificity);
 }
+
+// Student-friendly wording used in the candidate and report UI. The machine-readable reason
+// code is still shown next to it.
+export const FRIENDLY_REASONS: Record<ReasonCode, { title: string; detail: string }> = {
+  OPENING_TOP_RANKED_CLAIM: {
+    title: "Starting with your most important topic",
+    detail: "This is the resume claim the job cares about most and that needs the most detail.",
+  },
+  STRONG_DEEPEN: {
+    title: "Good answer, so going one level deeper",
+    detail: "Your last answer scored 2 or more out of 3, so the next question digs further.",
+  },
+  WEAK_FUNDAMENTAL: {
+    title: "Stepping back to the basics",
+    detail:
+      "Your last answer scored 1 or less, so here is a simpler question. This happens once per topic.",
+  },
+  AREA_BUDGET_EXHAUSTED: {
+    title: "Moving to the next topic",
+    detail: "We've asked 4 questions on that topic, which is the limit.",
+  },
+  REPEATED_WEAK_MOVE_ON: {
+    title: "Moving on to give you a fresh start",
+    detail: "Two tough answers in a row on one topic, so we switch to the next one.",
+  },
+  LADDER_COMPLETE_NEXT_CLAIM: {
+    title: "Topic complete",
+    detail: "You reached the deepest question on that topic, so we move on.",
+  },
+  NEXT_RANKED_CLAIM: {
+    title: "Next topic",
+    detail: "Moving to the next most important claim on your resume.",
+  },
+  TIME_UP: {
+    title: "That's the last question",
+    detail: "The interview has reached its question limit.",
+  },
+};
+
+export const FRIENDLY_RUNGS: Record<Rung, string> = {
+  fundamental: "Back to basics",
+  initial: "Opening question",
+  termFollowUp: "Follow-up on your words",
+  scenarioTwist: "Real-world twist",
+  whyDefense: "Defend your choice",
+};

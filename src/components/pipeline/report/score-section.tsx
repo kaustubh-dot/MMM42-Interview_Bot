@@ -2,7 +2,8 @@
 
 import type { Citation, ClaimEvaluation, Evaluation } from "@/types/pipeline";
 import type { ClientInterviewPlan, ClientTurn } from "../contract";
-import { GRADE_LABELS, RUNG_LABELS } from "../labels";
+import { FRIENDLY_RUNGS, GRADE_LABELS } from "../labels";
+import { Explainer, SectionHeading } from "../ui";
 
 interface Props {
   plan: ClientInterviewPlan;
@@ -12,10 +13,10 @@ interface Props {
   onSelect: (c: Citation) => void;
 }
 
-const STRENGTH_STYLES: Record<ClaimEvaluation["evidenceStrength"], string> = {
-  strong: "bg-emerald-50 text-emerald-800",
-  mixed: "bg-amber-50 text-amber-900",
-  thin: "bg-gray-100 text-gray-700",
+const STRENGTH: Record<ClaimEvaluation["evidenceStrength"], { label: string; hint: string }> = {
+  strong: { label: "Clear evidence", hint: "Answers on this topic agreed with each other." },
+  mixed: { label: "Mixed evidence", hint: "Some answers were much stronger than others." },
+  thin: { label: "Not much evidence", hint: "Fewer than two graded answers on this topic." },
 };
 
 /** Display-side check only; B's validator is the authority and removes failing scores. */
@@ -24,20 +25,43 @@ function citationIsExact(c: Citation, turns: ClientTurn[]): boolean {
   return !!turn && turn.speaker === "candidate" && turn.text.slice(c.start, c.end) === c.quote;
 }
 
+export function ScoreMeter({ score }: { score: number }) {
+  return (
+    <span className="flex items-center gap-1" aria-label={`${score} out of 3`}>
+      {[1, 2, 3].map((n) => (
+        <span
+          key={n}
+          className={`h-3 w-7 rounded-full border-2 border-[#111] ${n <= score ? "nb-bg-lavender" : "bg-white"}`}
+        />
+      ))}
+    </span>
+  );
+}
+
 export function ScoreSection({ plan, turns, evaluation, selected, onSelect }: Props) {
   const claims = [...plan.claims].sort((a, b) => a.rank - b.rank);
   return (
-    <section className="space-y-3" aria-label="Scores">
-      <div className="flex flex-wrap items-baseline gap-2">
-        <h2 className="text-lg font-semibold">Scores by claim</h2>
-        <span className="text-xs text-gray-500">
-          Spoken evidence only. Every score cites the candidate's exact words.
-        </span>
-      </div>
+    <section id="scores" className="scroll-mt-24 space-y-4" aria-label="Scores">
+      <SectionHeading
+        title="Scores by topic"
+        subtitle="Click any quote to see where it was said."
+      />
+      <Explainer title="How to read the scores">
+        <p>
+          Each topic is scored 0–3: <strong>0</strong> no evidence, <strong>1</strong> surface
+          (names tools, no how/why), <strong>2</strong> working (explains how it works with a real
+          detail), <strong>3</strong> deep (how, trade-offs and what can go wrong, from real
+          experience).
+        </p>
+        <p>
+          Only what was <em>said</em> is scored. Every score must quote the candidate's exact words;
+          if a quote doesn't match the transcript, the score is removed.
+        </p>
+      </Explainer>
       {evaluation.removedUncited > 0 && (
-        <p className="rounded-md border border-gray-200 bg-gray-50 p-2 text-sm text-gray-700">
-          {evaluation.removedUncited} score{evaluation.removedUncited === 1 ? " was" : "s were"}{" "}
-          removed because the cited evidence did not match the transcript.
+        <p className="nb-card flat bg-[#f3f3f3] p-3 text-sm">
+          🧹 {evaluation.removedUncited} score{evaluation.removedUncited === 1 ? " was" : "s were"}{" "}
+          thrown out because the quoted words didn't match the transcript.
         </p>
       )}
       {claims.map((claim) => {
@@ -45,77 +69,78 @@ export function ScoreSection({ plan, turns, evaluation, selected, onSelect }: Pr
         const notes = evaluation.notes.filter((n) => n.claimId === claim.id);
         if (!ev) {
           return (
-            <article key={claim.id} className="rounded-lg border border-dashed bg-white p-4">
-              <div className="flex items-center gap-2">
-                <span className="font-medium">{claim.skillArea}</span>
-                <span className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-600">
-                  Not assessed
-                </span>
+            <article key={claim.id} className="nb-card flat border-dashed p-5">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-lg font-black">{claim.skillArea}</span>
+                <span className="nb-pill bg-[#f3f3f3]">Not assessed</span>
               </div>
-              <p className="mt-1 text-sm text-gray-600">
-                The interview ended before this claim was reached. No score is given.
+              <p className="mt-1 text-gray-600">
+                The interview ended before reaching this topic, so it has no score.
               </p>
             </article>
           );
         }
         return (
-          <article key={claim.id} className="rounded-lg border bg-white p-4">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="font-medium">{claim.skillArea}</span>
-              <span className="rounded bg-indigo-600 px-2 py-0.5 text-sm font-semibold text-white">
+          <article key={claim.id} className="nb-card space-y-3 p-5">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="text-lg font-black">{claim.skillArea}</span>
+              <ScoreMeter score={ev.score} />
+              <span className="font-bold">
                 {ev.score}/3 · {GRADE_LABELS[ev.score]}
               </span>
-              <span
-                className={`rounded px-2 py-0.5 text-xs ${STRENGTH_STYLES[ev.evidenceStrength]}`}
-              >
-                {ev.evidenceStrength} evidence
+              <span className="nb-pill" title={STRENGTH[ev.evidenceStrength].hint}>
+                {STRENGTH[ev.evidenceStrength].label}
               </span>
               {ev.needsHumanReview && (
-                <span className="rounded border border-amber-300 px-2 py-0.5 text-xs text-amber-900">
-                  Needs human review
-                </span>
+                <span className="nb-pill nb-bg-salmon">👀 Needs a human look</span>
               )}
             </div>
-            <p className="mt-2 text-sm text-gray-800">{ev.rationale}</p>
-            <p className="mt-1 text-xs text-gray-500">
-              Path: {ev.ladderPath.map((r) => RUNG_LABELS[r]).join(" → ")}
+            <p className="text-gray-800">{ev.rationale}</p>
+            <p className="text-sm text-gray-600">
+              Questions on this topic: {ev.ladderPath.map((r) => FRIENDLY_RUNGS[r]).join(" → ")}
             </p>
-            <ul className="mt-2 space-y-1">
-              {ev.citations.map((c) => {
-                const exact = citationIsExact(c, turns);
-                const isSel =
-                  selected?.turnId === c.turnId &&
-                  selected.start === c.start &&
-                  selected.end === c.end;
-                return (
-                  <li key={`${c.turnId}-${c.start}-${c.end}`}>
-                    <button
-                      type="button"
-                      onClick={() => onSelect(c)}
-                      aria-pressed={isSel}
-                      className={`w-full rounded-md border px-2 py-1 text-left text-sm transition-colors hover:bg-yellow-50 ${
-                        isSel ? "border-yellow-400 bg-yellow-50" : "border-gray-200"
-                      }`}
-                    >
-                      <span className="mr-2 font-mono text-xs text-gray-500">{c.turnId}</span>
-                      <span className="italic">“{c.quote}”</span>
-                      {!exact && (
-                        <span className="ml-2 text-xs text-red-700">
-                          (does not match transcript)
+            <div className="space-y-2">
+              <p className="text-sm font-bold">Evidence (the candidate's own words)</p>
+              <ul className="space-y-2">
+                {ev.citations.map((c) => {
+                  const exact = citationIsExact(c, turns);
+                  const isSel =
+                    selected?.turnId === c.turnId &&
+                    selected.start === c.start &&
+                    selected.end === c.end;
+                  return (
+                    <li key={`${c.turnId}-${c.start}-${c.end}`}>
+                      <button
+                        type="button"
+                        onClick={() => onSelect(c)}
+                        aria-pressed={isSel}
+                        className={`w-full rounded-xl border-2 px-3 py-2 text-left transition-colors hover:bg-[#fff8c5] ${
+                          isSel
+                            ? "border-[#111] bg-[#fff3a3] shadow-[3px_3px_0_#111]"
+                            : "border-[#111]/20 bg-white"
+                        }`}
+                      >
+                        <span className="italic">“{c.quote}”</span>
+                        <span className="ml-2 whitespace-nowrap text-xs font-medium text-[#494cf3]">
+                          show in transcript →
                         </span>
-                      )}
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
+                        {!exact && (
+                          <span className="ml-2 text-xs font-bold text-[#b4232f]">
+                            (doesn't match transcript)
+                          </span>
+                        )}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
             {notes.map((n) => (
               <p
                 key={`${n.kind}-${n.turnIds.join()}`}
-                className="mt-2 rounded bg-sky-50 p-2 text-xs text-sky-900"
+                className="rounded-xl border-2 border-[#111] nb-bg-soft-lavender p-3 text-sm"
               >
-                <span className="font-medium">Drop-off note ({n.turnIds.join(", ")}):</span>{" "}
-                {n.text}
+                <span className="font-bold">📉 Drop-off noticed:</span> {n.text}
               </p>
             ))}
           </article>

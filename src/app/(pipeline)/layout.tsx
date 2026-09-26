@@ -1,24 +1,29 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { DM_Sans } from "next/font/google";
 import "../globals.css";
+import "@/components/pipeline/brutal.css";
+import { AppFooter, AppNavbar } from "@/components/pipeline/navbar";
 
-const inter = Inter({ subsets: ["latin"] });
+const dmSans = DM_Sans({ subsets: ["latin"], weight: ["400", "500", "700", "900"] });
 
 export const metadata: Metadata = {
-  title: "MMM42 Interview",
-  description: "Claim-based voice interview with cited evaluation",
+  title: "MMM42 Interview: practice interviews that show their work",
+  description:
+    "An AI voice interviewer that asks about what your resume really says, follows up like a person, and shows the exact words behind every score.",
 };
 
-// Separate root layout for the pipeline flow: no Supabase providers, so the fixture flow works
-// without any backend configured.
+// Root layout for the interview app: no Supabase providers, so the demo flow works without any
+// backend configured. The legacy FoloUp dashboard keeps its own layouts.
 export default function PipelineLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <body
         suppressHydrationWarning
-        className={`${inter.className} min-h-screen bg-gray-50 text-gray-900`}
+        className={`${dmSans.className} nb flex min-h-screen flex-col antialiased`}
       >
-        {children}
+        <AppNavbar />
+        <main className="flex-1">{children}</main>
+        <AppFooter />
       </body>
     </html>
   );

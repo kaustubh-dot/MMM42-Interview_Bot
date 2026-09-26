@@ -1,15 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  async redirects() {
-    return [
-      {
-        source: "/",
-        destination: "/dashboard",
-        permanent: true,
-      },
-    ];
-  },
-
+  // "/" is the interview app's home page (src/app/(pipeline)/page.tsx). The legacy FoloUp
+  // dashboard is still available at /dashboard.
   webpack: (webpackConfig, { webpack }) => {
     webpackConfig.plugins.push(
       // Remove node: from import specifiers, because Next.js does not yet support node: scheme
