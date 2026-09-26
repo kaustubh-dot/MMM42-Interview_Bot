@@ -136,10 +136,21 @@ export async function auditEvaluation(
       }
     : null;
   if (process.env.LLM_MODE === "mock" && mockOutput === null) {
-    throw new LlmError(
-      "LLM_CONFIGURATION",
-      "Only the unchanged golden record/evaluation has a precomputed mock audit.",
-    );
+    // MOCK ONLY: never fake a pass. Each check is marked for human review and says it was not run.
+    return {
+      precomputed: false,
+      checks: AUDIT_CHECK_TITLES.map((title, index) => ({
+        id: (index + 1) as 1 | 2 | 3,
+        title,
+        status: "concern" as const,
+        findings: [
+          {
+            text: "Not checked: demo mode does not run the auditor. A person should review this check.",
+            turnIds: [],
+          },
+        ],
+      })),
+    };
   }
   const request: LlmRequest = {
     task: "audit",

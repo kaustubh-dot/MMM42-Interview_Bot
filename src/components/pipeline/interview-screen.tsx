@@ -44,7 +44,7 @@ function ModeLabel() {
   const engineText =
     engine === "mock"
       ? "Demo engine (mock grader)"
-      : engine === "gemini"
+      : engine === "gemini" || engine === "groq"
         ? "Live AI engine"
         : engine;
   const storageText =
@@ -573,7 +573,9 @@ export function InterviewScreen({
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <span className="font-black">
-              Question {questionNumber} of up to {plan.maxQuestions}
+              {reply.finished
+                ? "Interview complete"
+                : `Question ${Math.min(questionNumber, plan.maxQuestions)} of up to ${plan.maxQuestions}`}
             </span>
             {claim && <span className="nb-pill">{claim.skillArea}</span>}
             <span className="nb-pill nb-bg-soft-lavender">{FRIENDLY_RUNGS[question.rung]}</span>

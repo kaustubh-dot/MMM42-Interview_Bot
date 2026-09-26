@@ -319,8 +319,26 @@ test("all model services in mock mode reproduce the golden report without networ
   assert.equal((await evaluateRecord(golden.record)).perClaim[0].score, 2);
   const changed = clone(golden.record);
   changed.turns[1].text += " Different spoken evidence.";
-  await assert.rejects(evaluateRecord(changed), { code: "LLM_CONFIGURATION" });
-  await assert.rejects(auditEvaluation(golden.record, evaluation), { code: "LLM_CONFIGURATION" });
+  // Changed demo attempts get a labelled demo evaluation (validated citations) and an audit that
+  // says it was not run: never the golden output, never a faked pass.
+  const demo = await evaluateRecord(changed);
+  assert.notDeepEqual(demo, golden.evaluation);
+  assert(demo.perClaim.length > 0);
+  for (const claim of demo.perClaim) {
+    assert.match(claim.rationale, /^Demo grader, not an AI assessment:/);
+    assert(claim.citations.length > 0);
+    for (const c of claim.citations) {
+      assert.equal(
+        changed.turns.find((t) => t.id === c.turnId).text.slice(c.start, c.end),
+        c.quote,
+      );
+    }
+  }
+  const demoAudit = await auditEvaluation(golden.record, evaluation);
+  assert.equal(demoAudit.precomputed, false);
+  assert.equal(demoAudit.checks.length, 3);
+  assert(demoAudit.checks.every((check) => check.status === "concern"));
+  assert(demoAudit.checks.every((check) => /^Not checked: demo mode/.test(check.findings[0].text)));
 });
 
 test("grader validates unknown grades and optional candidate words; input is allowlisted", async (t) => {

@@ -29,7 +29,7 @@ export class PipelineApiError extends Error {
 
 /** How the server is running, from A's X-Pipeline-Mode / X-Pipeline-Storage headers. */
 export interface PipelineMode {
-  engine: string | null; // "mock" | "gemini"
+  engine: string | null; // "mock" | "groq" | "gemini"
   storage: string | null; // e.g. "mock-memory"
 }
 

@@ -15,7 +15,12 @@ export function jsonResponse(body: unknown, status = 200): Response {
     status,
     headers: {
       "Cache-Control": "no-store",
-      "X-Pipeline-Mode": process.env.LLM_MODE === "mock" ? "mock" : "gemini",
+      "X-Pipeline-Mode":
+        process.env.LLM_MODE === "mock"
+          ? "mock"
+          : process.env.LLM_MODE === "groq"
+            ? "groq"
+            : "gemini",
       "X-Pipeline-Storage": "mock-memory",
     },
   });

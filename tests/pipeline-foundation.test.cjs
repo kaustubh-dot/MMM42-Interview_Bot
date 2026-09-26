@@ -121,6 +121,17 @@ test("missing/invalid modes and missing live credentials fail instead of returni
   process.env.LLM_MODE = "gemini";
   Reflect.deleteProperty(process.env, "GEMINI_API_KEY");
   await assert.rejects(generateJson(request), { code: "LLM_CONFIGURATION" });
+  const oldGroqKey = process.env.GROQ_API_KEY;
+  t.after(() => {
+    if (oldGroqKey === undefined) {
+      Reflect.deleteProperty(process.env, "GROQ_API_KEY");
+    } else {
+      process.env.GROQ_API_KEY = oldGroqKey;
+    }
+  });
+  process.env.LLM_MODE = "groq";
+  Reflect.deleteProperty(process.env, "GROQ_API_KEY");
+  await assert.rejects(generateJson(request), { code: "LLM_CONFIGURATION" });
 });
 
 test("Gemini adapter uses JSON mode and handles malformed, empty, and failed provider replies", async (t) => {

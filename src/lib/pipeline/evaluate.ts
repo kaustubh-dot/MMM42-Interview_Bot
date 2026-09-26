@@ -155,15 +155,54 @@ export function validateBlindEvaluation(record: InterviewRecord, raw: unknown): 
   });
 }
 
+export const DEMO_EVALUATION_LABEL = "Demo grader, not an AI assessment:";
+
+function firstSentence(text: string): string {
+  const match = text.match(/^[\s\S]*?[.!?](?=\s|$)/);
+  const sentence = (match ? match[0] : text).trim();
+  return sentence.length > 200 ? sentence.slice(0, 200) : sentence;
+}
+
+/**
+ * MOCK ONLY, clearly labelled: a deterministic evaluation for demo attempts that are not the
+ * unchanged golden sample. Scores are the demo grader's per-answer grades; every citation is the
+ * candidate's own words and still passes the same code validator as model output.
+ */
+export function demoEvaluation(record: InterviewRecord): Evaluation {
+  const grades = gradedAnswers(record);
+  const perClaim = record.plan.claims.flatMap((claim) => {
+    const answers = record.turns.filter(
+      (turn) => turn.speaker === "candidate" && turn.claimId === claim.id && grades.has(turn.id),
+    );
+    if (answers.length === 0) {
+      return [];
+    }
+    const claimGrades = answers.map((turn) => grades.get(turn.id) as number);
+    const score = Math.round(claimGrades.reduce((a, b) => a + b, 0) / claimGrades.length);
+    return [
+      {
+        claimId: claim.id,
+        score,
+        rationale: `${DEMO_EVALUATION_LABEL} average of ${answers.length} graded answer(s) (${claimGrades.join(", ")}).`,
+        citations: answers.flatMap((turn) => {
+          const quote = firstSentence(turn.text);
+          const start = turn.text.indexOf(quote);
+          return quote && start >= 0
+            ? [{ turnId: turn.id, start, end: start + quote.length, quote }]
+            : [];
+        }),
+      },
+    ];
+  });
+  return validateEvaluation(record, { perClaim, notes: [] });
+}
+
 /** One blind evaluator call; keep offsets and validate against the immutable original transcript. */
 export async function evaluateRecord(record: InterviewRecord): Promise<Evaluation> {
   const source = structuredClone(record);
   const mockOutput = isGoldenSpokenRecord(source) ? goldenEvaluationMock : null;
   if (process.env.LLM_MODE === "mock" && mockOutput === null) {
-    throw new LlmError(
-      "LLM_CONFIGURATION",
-      "Only the unchanged golden spoken record has a mock evaluation.",
-    );
+    return demoEvaluation(source);
   }
   const request: LlmRequest = {
     task: "evaluate",
