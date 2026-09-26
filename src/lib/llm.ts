@@ -52,8 +52,12 @@ async function generateGroqJson(request: LlmRequest): Promise<unknown> {
           model,
           temperature: 0,
           response_format: { type: "json_object" },
-          // gpt-oss spends output tokens on hidden reasoning; low keeps calls fast and within TPM.
-          ...(model.startsWith("openai/gpt-oss") && { reasoning_effort: "low" }),
+          // gpt-oss spends output tokens on hidden reasoning. "low" keeps the per-turn grade call
+          // fast and within TPM; "plan" is one call per interview and needs more deliberation to
+          // reliably fill every required field, so it gets more budget.
+          ...(model.startsWith("openai/gpt-oss") && {
+            reasoning_effort: request.task === "plan" ? "medium" : "low",
+          }),
           messages: [
             {
               role: "system",
@@ -62,7 +66,7 @@ async function generateGroqJson(request: LlmRequest): Promise<unknown> {
             { role: "user", content: JSON.stringify(request.input) },
           ],
         }),
-        signal: AbortSignal.timeout(30_000),
+        signal: AbortSignal.timeout(request.task === "plan" ? 45_000 : 30_000),
       });
       // Rate limited: wait what the server asks (capped) and retry a bounded number of times.
       if (response.status === 429 && attempt < GROQ_MAX_ATTEMPTS) {

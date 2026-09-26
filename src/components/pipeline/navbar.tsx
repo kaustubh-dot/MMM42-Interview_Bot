@@ -1,5 +1,6 @@
 "use client";
 
+import type { Role } from "@/lib/auth/session";
 import { Menu, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -12,10 +13,34 @@ const LINKS = [
   { href: "/practice", label: "Practice" },
   { href: "/report/sample", label: "Sample report" },
 ];
+const RECRUITER_LINK = { href: "/admin", label: "Recruiters" };
 
-export function AppNavbar() {
+async function signOut() {
+  await fetch("/api/auth/logout", { method: "POST" }).catch(() => null);
+  window.location.assign("/login");
+}
+
+/** `role` comes from the server layout; only recruiters see the Recruiters tab. */
+export function AppNavbar({
+  role = null,
+  name = null,
+}: { role?: Role | null; name?: string | null }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const links = role === "recruiter" ? [...LINKS, RECRUITER_LINK] : LINKS;
+  const account = role ? (
+    <button
+      type="button"
+      onClick={signOut}
+      className="rounded-lg px-3 py-2 text-sm font-medium hover:bg-white/70"
+    >
+      Sign out{name ? ` (${name})` : role === "recruiter" ? " (recruiter)" : ""}
+    </button>
+  ) : (
+    <Link href="/login" className="rounded-lg px-3 py-2 font-medium hover:bg-white/70">
+      Sign in
+    </Link>
+  );
   const active = (href: string) => (href === "/" ? pathname === "/" : pathname.startsWith(href));
 
   return (
@@ -31,7 +56,7 @@ export function AppNavbar() {
           MMM42 Interview
         </Link>
         <ul className="ml-auto hidden items-center gap-1 md:flex">
-          {LINKS.map((l) => (
+          {links.map((l) => (
             <li key={l.href}>
               <Link
                 href={l.href}
@@ -46,10 +71,17 @@ export function AppNavbar() {
             </li>
           ))}
           <li className="ml-3">
-            <NbLinkButton href="/interview" variant="primary" size="sm">
-              Start interview
-            </NbLinkButton>
+            {role === "recruiter" ? (
+              <NbLinkButton href="/admin/schedule" variant="primary" size="sm">
+                Schedule interview
+              </NbLinkButton>
+            ) : (
+              <NbLinkButton href="/interview" variant="primary" size="sm">
+                Start interview
+              </NbLinkButton>
+            )}
           </li>
+          <li>{account}</li>
         </ul>
         <button
           type="button"
@@ -63,7 +95,7 @@ export function AppNavbar() {
       </nav>
       {open && (
         <ul className="space-y-1 border-t-2 border-[#111] bg-white px-4 py-3 md:hidden">
-          {[...LINKS, { href: "/interview", label: "Start interview" }].map((l) => (
+          {[...links, { href: "/interview", label: "Start interview" }].map((l) => (
             <li key={l.href}>
               <Link
                 href={l.href}
@@ -74,6 +106,7 @@ export function AppNavbar() {
               </Link>
             </li>
           ))}
+          <li>{account}</li>
         </ul>
       )}
     </header>

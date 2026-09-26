@@ -9,8 +9,9 @@ import { type GradeAnswer, advanceInterview, createOpeningSession } from "./engi
 import { PipelineError } from "./errors";
 import { gradeAnswer } from "./grade";
 import { mockGradeAnswer } from "./mock-grader";
-import { type SessionStore, mockSessionStore } from "./mock-session-store";
+import type { SessionStore } from "./mock-session-store";
 import { planIdentities } from "./scoring-context";
+import { sessionStore } from "./session-store";
 
 const processState = globalThis as typeof globalThis & {
   mmm42InterviewLocks?: Map<string, Promise<void>>;
@@ -57,6 +58,7 @@ function startRequest(raw: unknown): StartRequest {
   return {
     interviewId: id(raw.interviewId, "interviewId"),
     requestId: id(raw.requestId, "requestId"),
+    ...(raw.roleId !== undefined && raw.roleId !== null && { roleId: id(raw.roleId, "roleId") }),
   };
 }
 
@@ -157,7 +159,7 @@ function submitRequest(raw: unknown): SubmitTurnRequest {
 
 export async function startAttempt(
   raw: unknown,
-  store: SessionStore = mockSessionStore,
+  store: SessionStore = sessionStore,
 ): Promise<TurnReply> {
   const request = startRequest(raw);
   return withInterviewLock(request.interviewId, async () => {
@@ -207,14 +209,14 @@ export async function startAttempt(
       }
     }
     const session = createOpeningSession(plan, request.requestId);
-    await store.createSession(session);
+    await store.createSession(session, request.roleId ? { roleId: request.roleId } : undefined);
     return session.lastReply as TurnReply;
   });
 }
 
 export async function submitCandidateTurn(
   raw: unknown,
-  store: SessionStore = mockSessionStore,
+  store: SessionStore = sessionStore,
   grader?: GradeAnswer,
 ): Promise<TurnReply> {
   const request = submitRequest(raw);
@@ -254,7 +256,7 @@ export async function submitCandidateTurn(
   });
 }
 
-export async function readSession(interviewId: string, store: SessionStore = mockSessionStore) {
+export async function readSession(interviewId: string, store: SessionStore = sessionStore) {
   const current = await store.loadSession(id(interviewId, "interviewId"));
   if (!current) {
     throw new PipelineError("UNKNOWN_ATTEMPT", "Interview attempt not found.", 404);

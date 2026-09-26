@@ -25,6 +25,8 @@ const ACTIVE_KEY = "mmm42:active-attempt";
 interface Props {
   /** Browser-safe golden sample (no hidden answers). */
   sample: ClientInterviewReport;
+  /** FoloUp role (interview.id) from /interview?role=; the saved response is listed under it. */
+  roleId?: string;
 }
 
 interface ActiveAttempt {
@@ -80,7 +82,7 @@ function demoPlan(
   };
 }
 
-export function InterviewApp({ sample }: Props) {
+export function InterviewApp({ sample, roleId }: Props) {
   const [phase, setPhase] = useState<Phase>("setup");
   const [plan, setPlan] = useState<ClientInterviewPlan | null>(null);
   const [mode, setMode] = useState<Mode>("live");
@@ -104,8 +106,8 @@ export function InterviewApp({ sample }: Props) {
     if (mode === "fixture") {
       return createFixtureDriver(sample);
     }
-    return createLiveDriver(plan.interviewId, mode === "demo" ? sample : undefined);
-  }, [plan, mode, sample, runKey]);
+    return createLiveDriver(plan.interviewId, mode === "demo" ? sample : undefined, roleId);
+  }, [plan, mode, sample, roleId, runKey]);
 
   const reportHref =
     mode === "fixture" || !plan
@@ -166,6 +168,7 @@ export function InterviewApp({ sample }: Props) {
 
         {phase === "setup" && (
           <SetupScreen
+            roleId={roleId}
             onPlan={(p) => {
               setMode("live");
               setPlan(p);
