@@ -26,7 +26,9 @@ function uniqueTurns(record: InterviewRecord): Map<string, Turn> {
     }
     turns.set(turn.id, turn);
   }
-  duplicates.forEach((id) => turns.delete(id));
+  for (const id of Array.from(duplicates)) {
+    turns.delete(id);
+  }
   return turns;
 }
 
@@ -76,7 +78,9 @@ export function gradedAnswers(record: InterviewRecord): Map<string, Grade> {
     }
     grades.set(id, decision.lastGrade);
   }
-  conflicting.forEach((id) => grades.delete(id));
+  for (const id of Array.from(conflicting)) {
+    grades.delete(id);
+  }
   return grades;
 }
 

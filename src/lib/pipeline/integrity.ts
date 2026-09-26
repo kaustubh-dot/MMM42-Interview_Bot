@@ -1,4 +1,5 @@
 import type { IntegrityReport, IntegritySignal, InterviewRecord } from "@/types/pipeline";
+import type { FaceSignalAvailability } from "@/types/pipeline-api";
 
 // HARD CONSTRAINT: never output a binary "cheating: yes/no". The output is a
 // concern level that prompts human review, and it never changes any score.
@@ -38,7 +39,7 @@ export function responseLatencies(record: InterviewRecord): number[] {
 /** Pure fusion: no access to evaluation and no score mutation, regardless of event changes. */
 export function fuseIntegrity(
   record: InterviewRecord,
-  faceSignals: { available: boolean; reason?: string },
+  faceSignals: FaceSignalAvailability,
 ): IntegrityReport {
   const count = (kind: string, minimumDuration?: number) =>
     record.integrityEvents.filter(
@@ -118,9 +119,12 @@ export function fuseIntegrity(
   });
 
   const delays = responseLatencies(record);
-  const mean = delays.length ? delays.reduce((sum, value) => sum + value, 0) / delays.length : 0;
-  const variance = delays.length
-    ? delays.reduce((sum, value) => sum + (value - mean) ** 2, 0) / delays.length
+  // Scaling is CV-invariant and avoids overflow when malformed timestamps are very large.
+  const maximum = delays.reduce((largest, value) => Math.max(largest, value), 0);
+  const scaled = maximum > 0 ? delays.map((value) => value / maximum) : [];
+  const mean = scaled.length ? scaled.reduce((sum, value) => sum + value, 0) / scaled.length : 0;
+  const variance = scaled.length
+    ? scaled.reduce((sum, value) => sum + (value - mean) ** 2, 0) / scaled.length
     : 0;
   const cv = mean > 0 ? Math.sqrt(variance) / mean : 0;
   const available = delays.length >= 4 && mean > 0 && Number.isFinite(cv);

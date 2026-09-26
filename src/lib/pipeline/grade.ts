@@ -1,6 +1,11 @@
+import "server-only";
+
 import { goldenReport } from "@/fixtures/golden-interview";
+import { LlmError, generateJson } from "@/lib/llm";
 import { identityValuesFrom, redactIdentityText } from "@/lib/prompts/pipeline/blind";
-import type { Grade, RubricLevel } from "@/types/pipeline";
+import { GRADE_SYSTEM_PROMPT } from "@/lib/prompts/pipeline/grade";
+import type { RubricLevel } from "@/types/pipeline";
+import type { GradeInput, GradeResult, LlmRequest } from "@/types/pipeline-api";
 import { gradedAnswers, isGrade } from "./citations";
 
 function validateRubric(rubric: RubricLevel[]): void {
@@ -23,12 +28,7 @@ function validateRubric(rubric: RubricLevel[]): void {
 }
 
 /** Rebuild only the documented fields; runtime extra fields cannot leak into scoring. */
-export function buildBlindGradeInput(input: {
-  rubric: RubricLevel[];
-  claimId: string;
-  questionText: string;
-  answerText: string;
-}) {
+export function buildBlindGradeInput(input: GradeInput) {
   validateRubric(input.rubric);
   if (
     typeof input.claimId !== "string" ||
@@ -48,10 +48,7 @@ export function buildBlindGradeInput(input: {
   };
 }
 
-export function validateGradeResult(
-  answerText: string,
-  raw: unknown,
-): { grade: Grade; term: string | null; quote: string | null } {
+export function validateGradeResult(answerText: string, raw: unknown): GradeResult {
   if (
     typeof raw !== "object" ||
     raw === null ||
@@ -60,6 +57,9 @@ export function validateGradeResult(
     !isGrade(raw.grade)
   ) {
     throw new Error("Grader returned an invalid grade; expected an integer from 0 to 3.");
+  }
+  if (!answerText.trim()) {
+    return { grade: 0, term: null, quote: null };
   }
   const candidateWords = (value: unknown) =>
     typeof value === "string" && value.trim() && !value.includes("█") && answerText.includes(value)
@@ -83,17 +83,7 @@ const GOLDEN_TERMS: Record<string, string> = {
   t16: "unique constraint",
 };
 
-/** Fixture-only until A publishes GradeInput, GradeResult and generateJson in A1. */
-export async function gradeAnswer(input: {
-  rubric: RubricLevel[];
-  claimId: string;
-  questionText: string;
-  answerText: string;
-}): Promise<{ grade: Grade; term: string | null; quote: string | null }> {
-  const blind = buildBlindGradeInput(input);
-  if (process.env.LLM_MODE !== "mock") {
-    throw new Error("Grader integration is pending A1; the current service requires LLM_MODE=mock.");
-  }
+function fixtureGrade(input: GradeInput) {
   const index = goldenReport.record.turns.findIndex(
     (turn, i, turns) =>
       turn.speaker === "candidate" &&
@@ -107,16 +97,43 @@ export async function gradeAnswer(input: {
     index < 0 ||
     JSON.stringify(input.rubric) !== JSON.stringify(goldenReport.record.plan.rubric)
   ) {
-    throw new Error("Only exact golden question/answer pairs and the shared fixture rubric have mock grades.");
+    return null;
   }
   const turn = goldenReport.record.turns[index];
   const grade = gradedAnswers(goldenReport.record).get(turn.id);
   const citation = goldenReport.evaluation.perClaim
     .flatMap((claim) => claim.citations)
     .find((item) => item.turnId === turn.id);
-  return validateGradeResult(blind.answerText, {
-    grade,
+  return {
+    grade: grade ?? 0,
     term: GOLDEN_TERMS[turn.id],
     quote: citation?.quote ?? null,
-  });
+  };
+}
+
+/** At most one call with the actual plan rubric; silence deterministically means No evidence. */
+export async function gradeAnswer(input: GradeInput): Promise<GradeResult> {
+  const blind = buildBlindGradeInput(input);
+  if (!input.answerText.trim()) {
+    return { grade: 0, term: null, quote: null };
+  }
+  const mockOutput = fixtureGrade(input);
+  if (process.env.LLM_MODE === "mock" && mockOutput === null) {
+    throw new LlmError(
+      "LLM_CONFIGURATION",
+      "Only exact golden question/answer pairs and the shared fixture rubric have mock grades.",
+    );
+  }
+  const request: LlmRequest = {
+    task: "grade",
+    system: GRADE_SYSTEM_PROMPT,
+    input: blind,
+    mockOutput,
+  };
+  const raw = await generateJson(request);
+  try {
+    return validateGradeResult(blind.answerText, raw);
+  } catch {
+    throw new LlmError("LLM_INVALID_RESPONSE", "Grader returned an invalid 0–3 grade.");
+  }
 }
