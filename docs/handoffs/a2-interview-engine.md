@@ -178,6 +178,22 @@ by install scripts were reverted to the initially clean copy.
 - The scene allowlist must be checked against C's selected Excalidraw version.
   Submitted scenes use A1's example format; uploads and collaboration stay disabled.
 
+## Next integration gates
+
+A2 review found no blocker for the labeled mock flow. PR #4 stays unmerged until
+explicit merge authorization; A3 remains on hold.
+
+- [ ] A/B/C coordinate actual browser TTS-completion timing before enabling
+  latency-based integrity scoring.
+- [ ] A/C/D check one real Excalidraw scene through submission, persistence,
+  and reload with C's selected editor version.
+
+For follow-up work, reuse existing tests. Ordinary changes use TypeScript, scoped
+lint, and one focused end-to-end smoke check. Run relevant checks once per meaningful
+change; repeat only after a failure or further change. Add a small regression only
+for an important uncovered bug. Preserve useful tests and skip repeated builds
+while the known Supabase configuration blocker is unchanged.
+
 ## Validation
 
 - `npm ci`: passed with network/cache access; initial sandbox cache attempt failed
