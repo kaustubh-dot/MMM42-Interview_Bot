@@ -6,11 +6,7 @@
 
 import { PipelineApiError, getSession } from "@/components/pipeline/api-client";
 import { ClaimsView } from "@/components/pipeline/claims-view";
-import type {
-  ClientInterviewPlan,
-  ClientInterviewReport,
-  FaceSignalAvailability,
-} from "@/components/pipeline/contract";
+import type { ClientInterviewPlan, ClientInterviewReport } from "@/components/pipeline/contract";
 import { createLiveDriver } from "@/components/pipeline/interview-driver";
 import { InterviewScreen } from "@/components/pipeline/interview-screen";
 import { MonitoringDisclosure } from "@/components/pipeline/monitoring-disclosure";
@@ -21,11 +17,6 @@ import { CalendarClock, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 const FACE_FLAG_ON = process.env.NEXT_PUBLIC_FACE_SIGNALS === "on";
-// Same availability as the main interview page until D's face-signal hook is connected.
-const FACE_SIGNALS: FaceSignalAvailability = {
-  available: false,
-  reason: FACE_FLAG_ON ? "camera capture not connected yet" : "off for this interview",
-};
 
 type Phase =
   | { kind: "loading" }
@@ -207,7 +198,7 @@ export function InviteInterview({
 
         {phase.kind === "ready" && (
           <MonitoringDisclosure
-            faceSignalsEnabled={FACE_SIGNALS.available}
+            faceSignalsEnabled={FACE_FLAG_ON}
             speechSupported={speechProbe.supported.recognition}
             onBack={() => setPhase({ kind: "topics" })}
             onStart={() => setPhase({ kind: "interview" })}
@@ -221,7 +212,7 @@ export function InviteInterview({
             <InterviewScreen
               driver={driver}
               plan={plan}
-              faceSignals={FACE_SIGNALS}
+              faceSignalsEnabled={FACE_FLAG_ON}
               resume={resume}
               onFinished={() => setFinished(true)}
             />
