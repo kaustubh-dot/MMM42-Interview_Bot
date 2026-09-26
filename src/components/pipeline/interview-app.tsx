@@ -74,6 +74,9 @@ export function InterviewApp({ sample }: Props) {
         <Link href="/report/sample" className="ml-auto text-xs text-indigo-700 hover:underline">
           Open sample report (fixture)
         </Link>
+        <Link href="/report/workspace-samples" className="text-xs text-indigo-700 hover:underline">
+          Workspace samples
+        </Link>
       </div>
 
       {phase === "setup" && (

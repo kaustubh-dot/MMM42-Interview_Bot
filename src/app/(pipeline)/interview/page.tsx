@@ -1,7 +1,7 @@
 import { InterviewApp } from "@/components/pipeline/interview-app";
-import { getSampleReport } from "../sample-data";
+import { clientGoldenReport } from "@/fixtures/client-golden-interview";
 
-// Server component: the sample is sanitized here, so hidden answers never reach the browser.
+// The sample is A's generated browser-safe fixture (no hidden answers).
 export default function InterviewPage() {
-  return <InterviewApp sample={getSampleReport()} />;
+  return <InterviewApp sample={clientGoldenReport} />;
 }

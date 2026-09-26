@@ -51,6 +51,9 @@ export function ReportView({ report, fixture }: Props) {
           <Link href="/interview" className="text-indigo-700 hover:underline">
             New interview
           </Link>
+          <Link href="/report/workspace-samples" className="text-indigo-700 hover:underline">
+            Workspace samples
+          </Link>
           {!fixture && (
             <Link href="/report/sample" className="text-indigo-700 hover:underline">
               Sample report (fixture)

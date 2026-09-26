@@ -3,9 +3,9 @@
 // client only sends what the candidate produced.
 
 import type {
-  ApiErrorBody,
   ClientInterviewPlan,
   ClientInterviewReport,
+  PipelineErrorResponse,
   StartRequest,
   SubmitTurnRequest,
   TurnReply,
@@ -41,7 +41,7 @@ async function call<T>(url: string, init: RequestInit): Promise<T> {
     // Non-JSON (e.g. Next's 404 page) falls through to the generic error below.
   }
   if (!res.ok) {
-    const err = (body as ApiErrorBody | null)?.error;
+    const err = (body as PipelineErrorResponse | null)?.error;
     if (!err && res.status === 404) {
       throw new PipelineApiError(
         404,

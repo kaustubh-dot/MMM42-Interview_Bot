@@ -4,8 +4,9 @@
 // save with a failure toggle, local demo content only, and never calls a backend.
 
 import { Button } from "@/components/ui/button";
+import { workspaceExamples } from "@/fixtures/workspace-interview";
 import { useRef, useState } from "react";
-import type { AnswerArtifact } from "./contract";
+import { type AnswerArtifact, workspaceForQuestion } from "./contract";
 import { clearDraft, loadDraft, saveDraft } from "./draft-store";
 import {
   ArtifactReview,
@@ -36,6 +37,14 @@ const QUESTIONS: Record<string, WorkspaceMode> = {
     kind: "whiteboard",
     prompt: "Sketch a read-through cache in front of a product catalog.",
   },
+  // A's safe workspace fixture questions, selected with the same rule as the interview screen.
+  ...Object.fromEntries(
+    workspaceExamples.flatMap((ex) => {
+      const question = ex.record.turns.find((t) => t.speaker === "ai");
+      const mode = question ? workspaceForQuestion(ex.record.plan, question) : null;
+      return mode ? [[`sample-${ex.kind}`, mode]] : [];
+    }),
+  ),
 };
 
 export function WorkspaceCheck() {

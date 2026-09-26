@@ -10,6 +10,8 @@ interface Props {
   turns: ClientTurn[];
   selected: Citation | null;
   focusTurnId: string | null;
+  /** Expand submitted artifacts by default (standalone samples). */
+  artifactsOpen?: boolean;
 }
 
 function fmt(ms: number): string {
@@ -18,7 +20,7 @@ function fmt(ms: number): string {
 }
 
 /** Saved transcript. The selected citation is highlighted from its exact saved offsets. */
-export function TranscriptPanel({ turns, selected, focusTurnId }: Props) {
+export function TranscriptPanel({ turns, selected, focusTurnId, artifactsOpen = false }: Props) {
   const markRef = useRef<HTMLElement>(null);
   const turnRefs = useRef(new Map<string, HTMLLIElement>());
 
@@ -38,7 +40,9 @@ export function TranscriptPanel({ turns, selected, focusTurnId }: Props) {
     <section aria-label="Transcript" className="rounded-lg border bg-white">
       <header className="border-b px-4 py-2">
         <h2 className="text-sm font-semibold">Transcript</h2>
-        <p className="text-xs text-gray-500">Click a quote in a score to highlight it here.</p>
+        {!artifactsOpen && (
+          <p className="text-xs text-gray-500">Click a quote in a score to highlight it here.</p>
+        )}
       </header>
       <ol className="space-y-3 p-4">
         {turns.map((t) => {
@@ -80,7 +84,12 @@ export function TranscriptPanel({ turns, selected, focusTurnId }: Props) {
                 )}
               </p>
               {t.artifacts?.map((a) => (
-                <SubmittedArtifact key={`${t.id}-${a.kind}`} turnId={t.id} artifact={a} />
+                <SubmittedArtifact
+                  key={`${t.id}-${a.kind}`}
+                  turnId={t.id}
+                  artifact={a}
+                  defaultOpen={artifactsOpen}
+                />
               ))}
             </li>
           );
@@ -93,12 +102,14 @@ export function TranscriptPanel({ turns, selected, focusTurnId }: Props) {
 function SubmittedArtifact({
   turnId,
   artifact,
+  defaultOpen,
 }: {
   turnId: string;
+  defaultOpen: boolean;
   artifact: NonNullable<ClientTurn["artifacts"]>[number];
 }) {
   // Mounted on demand so the report does not load Monaco/Excalidraw for every turn up front.
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
   return (
     <div className="mt-2 rounded-md border border-sky-200 bg-sky-50/50">
       <button
