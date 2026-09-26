@@ -1,7 +1,7 @@
 # CLAUDE.md: source of truth for the hackathon build
 
 > If code and this file disagree, that is a bug. Fix whichever one is wrong, in the same change.
-> Last updated: 2026-09-26, A1 foundation implemented on `feat/interview-engine`. Shared workspace/API types, safe fixtures and the mock/Gemini adapter exist; live pillar implementation is still pending.
+> Last updated: 2026-09-26, A2 engine/API mock demo implemented on `feat/interview-engine` after A1 merge `97838f2`. Shared contracts are unchanged. B's live grader and D's durable persistence are pending; see [A2 handoff](docs/handoffs/a2-interview-engine.md).
 > Assignment checklist: [Team implementation plan](docs/superpowers/plans/2026-09-26-team-kickoff.md). A, B and C start now; D joins later. Planned additions below are requirements, not claims of implemented behavior.
 
 ## 1. Summary
@@ -50,7 +50,7 @@ Status values: `not started` → `in progress` → `demo path works` → `done`.
 
 ### Pillar 2: Adaptive interview engine. Owner: **A** (B supports with the grader)
 - **Done looks like:** a spoken interview in Chrome. Each turn: STT → a grade call scores the answer 0–3 on the shared rubric → the pure function `selectNext()` applies the rule → the question text comes from the precomputed ladder (the LLM only fills `{{term}}` / `{{quote}}`) → TTS. Every turn appends a `Decision` with a `ReasonCode`, and a live decision-log panel shows them.
-- **Status:** not started. The reference rule implementation is in `scripts/build-golden-fixture.mjs` (`selectNext`). The live version must match it.
+- **Status:** demo path works. A2's pure selector matches the reference in `scripts/build-golden-fixture.mjs`; start/turn/session APIs use explicitly labeled fixture grading and process-memory storage. B's live grading and C's spoken browser flow remain pending. See [A2 handoff](docs/handoffs/a2-interview-engine.md).
 
 ### Pillar 3: Evidence-grounded evaluation + scoped audit. Owner: **B**
 - **Done looks like:**
@@ -84,7 +84,7 @@ Status values: `not started` → `in progress` → `demo path works` → `done`.
 - Link final snapshots to the candidate turn; save drafts separately from submitted answers. Submit captures current state immediately rather than waiting for a debounced callback. Explicitly save cleared content, and show save failure/retry without losing edits.
 - For this release, the grader and evaluator score only the spoken explanation. Code and drawings are labeled **supporting artifact — human review**. No code/diagram score or correctness verdict is implied. Citations remain offsets into `Turn.text`; do not silently append code or diagram descriptions to it.
 - Adapt the upstream components with local loading/error fallbacks, React 18-compatible dependencies, and retained MIT attribution. Aural's relay servers, tRPC, auth and database migrations are not needed for these wrappers.
-- **Status:** not started. The existing fixture has SQL starter code; add separately labeled code/whiteboard demo submissions without invalidating the original golden fixture.
+- **Status:** in progress. A1's separate code/whiteboard examples remain valid; A2 selects and validates submitted workspaces/artifacts, including cleared content. C owns editable/read-only UI and D owns durability. The original golden fixture is unchanged.
 
 ## 4. Data contract (the most important section)
 
@@ -111,7 +111,7 @@ Build against the fixture until the upstream pillar is live. `LLM_MODE=mock` mak
 
 ### A1 contract additions (implemented; A owns further changes)
 
-The optional workspace/artifact types below now exist in `src/types/pipeline.ts`; API/module types are in `src/types/pipeline-api.ts`. Client projections and independent fixtures are implemented. Runtime input validation, state transitions and persistence remain A2/D tasks; the limits below are their requirements. B/C/D consume the A1 foundation commit before connecting live modules. Any further contract change still follows §6.
+The optional workspace/artifact types below exist in `src/types/pipeline.ts`; API/module types are in `src/types/pipeline-api.ts`. Client projections, independent fixtures, A2 runtime validation and deterministic state transitions are implemented. Persistence uses an explicitly labeled mock until D's durable service is connected. B/C/D consume the A1 foundation commit before connecting live modules. Any further contract change still follows §6.
 
 - Add optional `QuestionLadder.workspace`: `{ kind: "code" } | { kind: "whiteboard"; prompt: string }`. A code workspace requires `codeSnippet`. Existing technical plans with a snippet and no workspace continue to select code mode. A whiteboard workspace uses its prompt at `scenarioTwist`; other rungs use the existing ladder.
 - Add optional `Turn.artifacts: AnswerArtifact[]`, where `AnswerArtifact` is `{ kind: "code"; language: string; code: string } | { kind: "whiteboard"; sceneJson: string }`. Version 1 allows at most one artifact per candidate turn, matching that question's workspace. The parent turn provides ID, claim and timing; no new artifact citation format is introduced.

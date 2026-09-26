@@ -12,7 +12,7 @@
 
 ## Scope and working rules
 
-- A1 foundation is implemented on `feat/interview-engine`; its publication/merge is the first handoff. A2/A3 and B/C/D tasks remain unstarted in this checkout. Existing assets include the FoloUp shell, golden fixture and reference algorithms.
+- A1 foundation is merged through PR #1 (`97838f2`). A2's engine/start/turn/session mock demo is implemented on `feat/interview-engine`; see [A2 handoff](../../handoffs/a2-interview-engine.md). A3 and B/C/D live implementations remain unstarted in this checkout. Existing assets include the FoloUp shell, golden fixture and reference algorithms.
 - A/B/C start now. D's arrival is unknown; use the arrival checklist below rather than blocking the first three teammates.
 - Provisionally allow six hours of build time and one protected rehearsal hour. Record actual names, deadline and D's arrival in the kickoff discussion before assigning calendar times.
 - Keep the selection rule, shared 0–3 rubric and integrity thresholds in `CLAUDE.md` unchanged.
@@ -172,12 +172,13 @@ Use `{ error: { code: string; message: string } }` for errors. Invalid input is 
 
 **Files:** new `select-next.ts`, `engine.ts`, pipeline start/turn/session routes.
 
-- [ ] Port the fixture selection rule into a pure function, preserving its exact precedence and constants.
-- [ ] Implement opening, candidate submission, grade application, next question selection and completion. Validate filled `term`/`quote` against the candidate text; use a safe template fallback if absent.
-- [ ] Select code/whiteboard only on the technical `scenarioTwist` rung using the agreed workspace field and legacy code-snippet fallback.
-- [ ] Implement artifact shape/size validation, server-derived `typedAnswer`, stable IDs and request deduplication. Reject mismatched workspace submissions; accept an explicit empty artifact when a candidate clears it.
-- [ ] Use a clearly labeled mock in-memory store until D's service is available. C's fixture replay stays usable independently; an in-memory session is not advertised as durable.
-- [ ] Wire B's `gradeAnswer` and expose the agreed routes. Connect D's persistence service in the same handlers at integration.
+- [x] Port the fixture selection rule into a pure function, preserving its exact precedence and constants.
+- [x] Implement opening, candidate submission, grade application, next question selection and completion. Validate filled `term`/`quote` against the candidate text; use a safe template fallback if absent.
+- [x] Select code/whiteboard only on the technical `scenarioTwist` rung using the agreed workspace field and legacy code-snippet fallback.
+- [x] Implement artifact shape/size validation, server-derived `typedAnswer`, stable IDs and request deduplication. Reject mismatched workspace submissions; accept an explicit empty artifact when a candidate clears it.
+- [x] Use a clearly labeled mock in-memory store until D's service is available. C's fixture replay stays usable independently; an in-memory session is not advertised as durable.
+- [x] Expose the agreed start/turn/session routes with isolated fixture-backed B/D adapters; integration instructions are in the A2 handoff.
+- [ ] Connect B's live `gradeAnswer` and D's durable persistence when their documented exports are available. A2 does not create competing modules or unresolved imports.
 
 **Acceptance:** golden reason sequence matches the reference, including strong/weak budget precedence, recovery from fundamental and max-question termination; the same retried submission does not append another turn or decision; a stale submit cannot overwrite a newer answer.
 
