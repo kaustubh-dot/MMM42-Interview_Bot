@@ -4,82 +4,15 @@ import { z } from "zod";
 
 import type { AnswerArtifact, Claim, Rung } from "../../types/pipeline";
 import { PipelineError } from "./errors";
+import {
+  CLEARED_SCENE,
+  CODE_LIMIT,
+  DRAWING_TYPES,
+  ELEMENT_KEYS,
+  FORBIDDEN_KEYS,
+  SCENE_LIMIT,
+} from "./whiteboard-allowlist";
 
-const CODE_LIMIT = 100 * 1024;
-const SCENE_LIMIT = 500 * 1024;
-const DRAWING_TYPES = new Set([
-  "rectangle",
-  "ellipse",
-  "diamond",
-  "text",
-  "arrow",
-  "line",
-  "freedraw",
-]);
-const ELEMENT_KEYS = new Set([
-  "id",
-  "type",
-  "x",
-  "y",
-  "width",
-  "height",
-  "angle",
-  "strokeColor",
-  "backgroundColor",
-  "fillStyle",
-  "strokeWidth",
-  "strokeStyle",
-  "roughness",
-  "opacity",
-  "groupIds",
-  "frameId",
-  "roundness",
-  "seed",
-  "version",
-  "versionNonce",
-  "isDeleted",
-  "boundElements",
-  "updated",
-  "link",
-  "locked",
-  "index",
-  "text",
-  "originalText",
-  "fontSize",
-  "fontFamily",
-  "textAlign",
-  "verticalAlign",
-  "containerId",
-  "autoResize",
-  "lineHeight",
-  "points",
-  "pressures",
-  "simulatePressure",
-  "lastCommittedPoint",
-  "startBinding",
-  "endBinding",
-  "elbowed",
-  "arrowType",
-  "flipHorizontal",
-  "flipVertical",
-  "scale",
-  "startArrowhead",
-  "endArrowhead",
-  "fixedSegments",
-  "startIsSpecial",
-  "endIsSpecial",
-]);
-const FORBIDDEN_KEYS = new Set([
-  "files",
-  "collaborators",
-  "fileId",
-  "dataURL",
-  "src",
-  "url",
-  "base64",
-  "binary",
-]);
-const CLEARED_SCENE = '{"elements":[],"appState":{}}';
 const finite = z.number().finite();
 const point = z.tuple([finite, finite]);
 const nullableId = z.string().nullable().optional();
