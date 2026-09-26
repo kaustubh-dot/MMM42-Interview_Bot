@@ -133,11 +133,11 @@ export function MonitoringDisclosure({
             <ul className="space-y-1.5 text-sm text-gray-800">
               <li>• If you leave this tab or window, and for how long.</li>
               <li>• If you paste text, and how many characters. We never keep what you pasted.</li>
-              <li>• How long you take to start answering.</li>
+              <li>• When you start and finish each answer (timing only).</li>
               <li>
                 •{" "}
                 {faceSignalsEnabled
-                  ? "Camera signals (face visible, looking away). Video stays in your browser."
+                  ? "Rough camera signals (is a face visible, is more than one face in view). They are processed in your browser, never uploaded, and are not eye tracking."
                   : "Camera signals are off for this interview."}
               </li>
             </ul>

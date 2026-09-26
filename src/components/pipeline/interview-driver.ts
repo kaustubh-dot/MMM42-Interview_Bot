@@ -1,10 +1,11 @@
 // Two ways to run the interview screen with one interface:
-// - live: A's turn API (server grades, selects and records every turn)
+// - live: A's turn API (server grades, selects and records every turn). In LLM_MODE=mock the
+//   server runs its labeled mock engine with in-memory storage; the UI shows that label.
 // - fixture replay: steps through the sanitized golden sample. Questions and decisions come
 //   from the recorded sample regardless of what the candidate says; nothing is graded.
 //   The UI labels this mode everywhere it appears.
 
-import { newRequestId, startInterview, submitTurn } from "./api-client";
+import { getSession, newRequestId, startInterview, submitTurn } from "./api-client";
 import type {
   ClientInterviewRecord,
   ClientInterviewReport,
@@ -18,16 +19,67 @@ export interface InterviewDriver {
   interviewId: string;
   start: () => Promise<TurnReply>;
   submit: (req: SubmitTurnRequest) => Promise<TurnReply>;
-  /** Fixture only: the sample candidate's answer to this question, for demo convenience. */
-  sampleAnswerFor?: (questionTurnId: string) => string | null;
+  /** Live only: reload the last accepted state (after a refresh or a 409 conflict). */
+  recover?: () => Promise<TurnReply>;
+  /** Demo convenience: the sample candidate's answer to the question with this text. */
+  sampleAnswerFor?: (question: { id: string; text: string; claimId: string; rung: string }) =>
+    | string
+    | null;
 }
 
-export function createLiveDriver(interviewId: string): InterviewDriver {
+/** Rebuilds the screen state from GET /session. */
+function replyFromSession(record: ClientInterviewRecord, finished: boolean): TurnReply {
+  const last = record.turns.at(-1);
+  const decision = record.decisions.at(-1);
+  if (!decision) {
+    throw new Error("This interview hasn't started yet.");
+  }
+  return {
+    record,
+    nextQuestion: !finished && last?.speaker === "ai" ? last : null,
+    decision,
+    finished,
+  };
+}
+
+/**
+ * Sample answers for the demo: match the recorded question by text, or else by claim and rung
+ * (the mock engine words follow-ups with a safe template, so the text can differ).
+ */
+function sampleAnswers(sample?: ClientInterviewReport) {
+  if (!sample) {
+    return undefined;
+  }
+  const turns = sample.record.turns;
+  const answerAfter = (i: number) =>
+    i >= 0 && turns[i + 1]?.speaker === "candidate" ? turns[i + 1].text : null;
+  return (question: { text: string; claimId: string; rung: string }) => {
+    const byText = turns.findIndex((t) => t.speaker === "ai" && t.text === question.text);
+    if (byText >= 0) {
+      return answerAfter(byText);
+    }
+    return answerAfter(
+      turns.findIndex(
+        (t) => t.speaker === "ai" && t.claimId === question.claimId && t.rung === question.rung,
+      ),
+    );
+  };
+}
+
+export function createLiveDriver(
+  interviewId: string,
+  sample?: ClientInterviewReport,
+): InterviewDriver {
   return {
     mode: "live",
     interviewId,
     start: () => startInterview({ interviewId, requestId: newRequestId() }),
     submit: submitTurn,
+    recover: async () => {
+      const s = await getSession(interviewId);
+      return replyFromSession(s.record, s.finished);
+    },
+    sampleAnswerFor: sampleAnswers(sample),
   };
 }
 
@@ -98,8 +150,8 @@ export function createFixtureDriver(sample: ClientInterviewReport): InterviewDri
       replies.set(req.requestId, reply);
       return reply;
     },
-    sampleAnswerFor: (questionTurnId) => {
-      const pos = full.turns.findIndex((t) => t.id === questionTurnId);
+    sampleAnswerFor: (question) => {
+      const pos = full.turns.findIndex((t) => t.id === question.id);
       const next = full.turns[pos + 1];
       return next?.speaker === "candidate" ? next.text : null;
     },

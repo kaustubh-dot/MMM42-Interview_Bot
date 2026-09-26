@@ -4,6 +4,7 @@
 
 import type {
   ClientInterviewPlan,
+  ClientInterviewRecord,
   ClientInterviewReport,
   PipelineErrorResponse,
   StartRequest,
@@ -26,12 +27,28 @@ export class PipelineApiError extends Error {
   }
 }
 
+/** How the server is running, from A's X-Pipeline-Mode / X-Pipeline-Storage headers. */
+export interface PipelineMode {
+  engine: string | null; // "mock" | "gemini"
+  storage: string | null; // e.g. "mock-memory"
+}
+
+let lastMode: PipelineMode = { engine: null, storage: null };
+/** Mode reported by the most recent pipeline response. */
+export const pipelineMode = (): PipelineMode => lastMode;
+
 async function call<T>(url: string, init: RequestInit): Promise<T> {
   let res: Response;
   try {
     res = await fetch(url, init);
   } catch {
     throw new PipelineApiError(0, "network", "Could not reach the server. Check the connection.");
+  }
+  if (res.headers.get("X-Pipeline-Mode") || res.headers.get("X-Pipeline-Storage")) {
+    lastMode = {
+      engine: res.headers.get("X-Pipeline-Mode"),
+      storage: res.headers.get("X-Pipeline-Storage"),
+    };
   }
   const text = await res.text();
   let body: unknown = null;
@@ -87,6 +104,21 @@ export async function createPlan(input: {
     body: form,
   });
   return res.plan;
+}
+
+export interface SessionState {
+  record: ClientInterviewRecord;
+  finished: boolean;
+}
+
+/** Last accepted state of an attempt (refresh recovery and 409 conflicts). */
+export function getSession(interviewId: string): Promise<SessionState> {
+  return call<SessionState>(
+    `/api/pipeline/session?interviewId=${encodeURIComponent(interviewId)}`,
+    {
+      method: "GET",
+    },
+  );
 }
 
 export function startInterview(req: StartRequest): Promise<TurnReply> {

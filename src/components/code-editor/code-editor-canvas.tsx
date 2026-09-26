@@ -306,7 +306,13 @@ export const CodeEditorCanvas = forwardRef<CodeEditorCanvasRef, CodeEditorCanvas
           ) : (
             <span className="font-medium uppercase tracking-wide">{language}</span>
           )}
-          {readOnly && <span className="ml-auto">Read-only</span>}
+          {readOnly ? (
+            <span className="ml-auto">Read-only</span>
+          ) : (
+            <span className="ml-auto hidden sm:inline" title="Monaco's 'Tab moves focus' toggle">
+              Tab indents · to leave with the keyboard press Ctrl+M (Mac: Ctrl+Shift+M), then Tab
+            </span>
+          )}
         </div>
         <div className="min-h-0 flex-1">
           <Editor

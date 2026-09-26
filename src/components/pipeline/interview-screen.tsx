@@ -6,7 +6,7 @@ import { useInterviewSpeech } from "@/hooks/use-interview-speech";
 import type { Turn } from "@/types/pipeline";
 import { Keyboard, Loader2, Mic, MicOff, RotateCcw, SkipForward, Volume2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { PipelineApiError, newRequestId } from "./api-client";
+import { PipelineApiError, newRequestId, pipelineMode } from "./api-client";
 import {
   type AnswerArtifact,
   type ClientInterviewPlan,
@@ -29,6 +29,45 @@ interface Props {
   plan: ClientInterviewPlan;
   faceSignals: FaceSignalAvailability;
   onFinished: (reply: TurnReply) => void;
+  /** Continue an attempt that already started (after a page refresh). */
+  resume?: boolean;
+  /** Offered when the server can't start the interview (e.g. demo needs LLM_MODE=mock). */
+  onFallback?: () => void;
+}
+
+/** Plain-language label for how the server is running (from A's response headers). */
+function ModeLabel() {
+  const { engine, storage } = pipelineMode();
+  if (!engine && !storage) {
+    return null;
+  }
+  const engineText =
+    engine === "mock"
+      ? "Demo engine (mock grader)"
+      : engine === "gemini"
+        ? "Live AI engine"
+        : engine;
+  const storageText =
+    storage === "mock-memory"
+      ? "answers kept in server memory only, not saved permanently"
+      : storage
+        ? `storage: ${storage}`
+        : "";
+  return (
+    <span className="nb-pill bg-[#fff3c4]" title="Reported by the interview server">
+      {engineText}
+      {storageText ? ` · ${storageText}` : ""}
+    </span>
+  );
+}
+
+/** performance.now() value matching the server's startedAt, so timings survive a refresh. */
+function perfOrigin(startedAtIso: string): number {
+  const elapsed = Date.now() - Date.parse(startedAtIso);
+  // Guard against clock skew: fall back to "now" if the offset is implausible.
+  return Number.isFinite(elapsed) && elapsed >= 0 && elapsed < 6 * 3600_000
+    ? performance.now() - elapsed
+    : performance.now();
 }
 
 type SubmitState =
@@ -79,7 +118,14 @@ function artifactTooLarge(artifact: AnswerArtifact | null): string | null {
   return null;
 }
 
-export function InterviewScreen({ driver, plan, faceSignals, onFinished }: Props) {
+export function InterviewScreen({
+  driver,
+  plan: initialPlan,
+  faceSignals,
+  onFinished,
+  resume,
+  onFallback,
+}: Props) {
   const attemptId = driver.interviewId;
   const [reply, setReply] = useState<TurnReply | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
@@ -104,8 +150,15 @@ export function InterviewScreen({ driver, plan, faceSignals, onFinished }: Props
   const listenStartRef = useRef<number | null>(null);
   const nudgedRef = useRef(false);
 
-  const question: Turn | null = reply?.nextQuestion ?? null;
-  const workspace = question ? workspaceForQuestion(plan, question) : null;
+  // The server's record is the source of truth once the interview has started.
+  const plan = reply?.record.plan ?? initialPlan;
+  // On completion the live API returns nextQuestion: null; show the saved closing turn instead.
+  const question: Turn | null =
+    reply?.nextQuestion ??
+    (reply?.finished
+      ? ([...reply.record.turns].reverse().find((t) => t.speaker === "ai") ?? null)
+      : null);
+  const workspace = question && !reply?.finished ? workspaceForQuestion(plan, question) : null;
   const finished = reply?.finished ?? false;
   // Read synchronously per question so the workspace mounts with this question's draft.
   // biome-ignore lint/correctness/useExhaustiveDependencies: keyed by question ID only
@@ -134,20 +187,38 @@ export function InterviewScreen({ driver, plan, faceSignals, onFinished }: Props
     [transcriptRef.current.trim(), interimRef.current.trim()].filter(Boolean).join(" ");
 
   // ── Start ────────────────────────────────────────────────────────
+  const startedRef = useRef(false);
   const start = useCallback(async () => {
     setStartError(null);
     try {
-      const first = await driver.start();
-      setStartedAtPerf(performance.now());
+      let first: TurnReply;
+      if (resume && driver.recover) {
+        first = await driver.recover();
+      } else {
+        try {
+          first = await driver.start();
+        } catch (err) {
+          // Already started (double click, React dev double effect, another tab): continue it.
+          if (err instanceof PipelineApiError && err.status === 409 && driver.recover) {
+            first = await driver.recover();
+          } else {
+            throw err;
+          }
+        }
+      }
+      setStartedAtPerf(perfOrigin(first.record.startedAt));
       setReply(first);
     } catch (err) {
       setStartError(err instanceof Error ? err.message : "Could not start the interview.");
     }
-  }, [driver]);
+  }, [driver, resume]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: start once on mount
   useEffect(() => {
-    start();
+    if (!startedRef.current) {
+      startedRef.current = true;
+      start();
+    }
   }, []);
 
   // ── Draft persistence ────────────────────────────────────────────
@@ -213,7 +284,8 @@ export function InterviewScreen({ driver, plan, faceSignals, onFinished }: Props
 
   // ── Submit ───────────────────────────────────────────────────────
   const submit = async () => {
-    if (!question || !startedAtPerf || submittingRef.current) {
+    // Never advance while the question is still being read aloud.
+    if (!question || !startedAtPerf || submittingRef.current || speech.status === "speaking") {
       return;
     }
     // Capture the editor/canvas state now; never wait for the debounced autosave.
@@ -269,6 +341,20 @@ export function InterviewScreen({ driver, plan, faceSignals, onFinished }: Props
     } catch (err) {
       const apiErr = err instanceof PipelineApiError ? err : null;
       const stale = apiErr?.status === 409;
+      // The server moved on (another tab or a delayed retry): load its last accepted state.
+      if (stale && apiErr?.code !== "REQUEST_ID_REUSED" && driver.recover) {
+        try {
+          const latest = await driver.recover();
+          requestIdRef.current = newRequestId();
+          setReply(latest);
+          setDraftNotice(
+            "This question was already answered, so we loaded the latest one. What you wrote is still saved as a draft for the old question.",
+          );
+          return;
+        } catch {
+          // fall through to the visible error below
+        }
+      }
       setSubmitState({
         kind: "error",
         stale,
@@ -377,9 +463,20 @@ export function InterviewScreen({ driver, plan, faceSignals, onFinished }: Props
       <div role="alert" className="nb-card mx-auto max-w-xl space-y-3 p-6">
         <p className="text-lg font-black">We couldn't start the interview.</p>
         <p className="text-gray-700">{startError}</p>
-        <NbButton variant="primary" onClick={start}>
-          Try again
-        </NbButton>
+        <div className="flex flex-wrap gap-3">
+          <NbButton variant="primary" onClick={start}>
+            Try again
+          </NbButton>
+          {onFallback && (
+            <NbButton onClick={onFallback}>Use the offline sample replay instead</NbButton>
+          )}
+        </div>
+        {onFallback && (
+          <p className="text-sm text-gray-600">
+            The demo needs the server to run in mock mode (LLM_MODE=mock). The offline replay works
+            without it: questions are pre-recorded and answers aren't graded.
+          </p>
+        )}
       </div>
     );
   }
@@ -480,6 +577,7 @@ export function InterviewScreen({ driver, plan, faceSignals, onFinished }: Props
             </span>
             {claim && <span className="nb-pill">{claim.skillArea}</span>}
             <span className="nb-pill nb-bg-soft-lavender">{FRIENDLY_RUNGS[question.rung]}</span>
+            {driver.mode === "live" && <ModeLabel />}
           </div>
           <div className="h-3 w-full overflow-hidden rounded-full border-2 border-[#111] bg-white">
             <div
@@ -549,6 +647,12 @@ export function InterviewScreen({ driver, plan, faceSignals, onFinished }: Props
                 }}
               />
             </div>
+          )}
+          {!speech.supported.synthesis && !finished && (
+            <p className="rounded-xl border-2 border-[#111] bg-[#fff3c4] px-4 py-2 text-sm">
+              This browser can't read questions aloud, so read each question above. Everything else
+              works the same.
+            </p>
           )}
         </section>
 
@@ -657,7 +761,12 @@ export function InterviewScreen({ driver, plan, faceSignals, onFinished }: Props
                   <NbButton
                     variant={workspace || submitState.kind === "error" ? "primary" : "default"}
                     onClick={() => submit()}
-                    disabled={submitting}
+                    disabled={submitting || speech.status === "speaking"}
+                    title={
+                      speech.status === "speaking"
+                        ? "Wait for the question to finish, or skip it"
+                        : undefined
+                    }
                   >
                     {submitState.kind === "error" && submitState.sendFailed
                       ? "Try sending again"
@@ -680,7 +789,16 @@ export function InterviewScreen({ driver, plan, faceSignals, onFinished }: Props
                 </>
               ) : (
                 <>
-                  <NbButton variant="primary" onClick={() => submit()} disabled={submitting}>
+                  <NbButton
+                    variant="primary"
+                    onClick={() => submit()}
+                    disabled={submitting || speech.status === "speaking"}
+                    title={
+                      speech.status === "speaking"
+                        ? "Wait for the question to finish, or skip it"
+                        : undefined
+                    }
+                  >
                     {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
                     {submitState.kind === "error" && submitState.sendFailed
                       ? "Try sending again"
@@ -693,13 +811,13 @@ export function InterviewScreen({ driver, plan, faceSignals, onFinished }: Props
                   )}
                 </>
               )}
-              {driver.sampleAnswerFor && (
+              {driver.sampleAnswerFor?.(question) && (
                 <button
                   type="button"
                   className="nb-link ml-auto text-sm font-medium text-[#494cf3] underline-offset-4 hover:underline"
                   disabled={submitting}
                   onClick={() => {
-                    const sample = driver.sampleAnswerFor?.(question.id);
+                    const sample = driver.sampleAnswerFor?.(question);
                     if (sample) {
                       speech.stopListening();
                       speech.markFirstSpeech();
