@@ -2,6 +2,7 @@
 
 import { TabSwitchWarning } from "@/components/call/tabSwitchPrevention";
 import { useBrowserIntegrity } from "@/hooks/use-browser-integrity";
+import { useFaceSignals } from "@/hooks/use-face-signals";
 import { useInterviewSpeech } from "@/hooks/use-interview-speech";
 import type { Turn } from "@/types/pipeline";
 import { Keyboard, Loader2, Mic, MicOff, RotateCcw, SkipForward, Volume2 } from "lucide-react";
@@ -27,7 +28,7 @@ import { NbButton } from "./ui";
 interface Props {
   driver: InterviewDriver;
   plan: ClientInterviewPlan;
-  faceSignals: FaceSignalAvailability;
+  faceSignalsEnabled: boolean;
   onFinished: (reply: TurnReply) => void;
   /** Continue an attempt that already started (after a page refresh). */
   resume?: boolean;
@@ -121,7 +122,7 @@ function artifactTooLarge(artifact: AnswerArtifact | null): string | null {
 export function InterviewScreen({
   driver,
   plan: initialPlan,
-  faceSignals,
+  faceSignalsEnabled,
   onFinished,
   resume,
   onFallback,
@@ -171,6 +172,15 @@ export function InterviewScreen({
     active: startedAtPerf !== null && !finished,
     startedAtPerf,
     currentTurnId: question?.id,
+  });
+
+  const face = useFaceSignals({
+    enabled: faceSignalsEnabled && driver.mode !== "fixture",
+    active: startedAtPerf !== null && question !== null && !finished,
+    startedAtPerf,
+    currentTurnId: question?.id,
+    onEvent: integrity.pushEvent,
+    pendingEventCount: () => integrity.pendingEvents().length,
   });
 
   const speech = useInterviewSpeech({
@@ -320,6 +330,7 @@ export function InterviewScreen({
       speech.firstSpeechAtPerf !== null
         ? Math.min(endMs, Math.round(speech.firstSpeechAtPerf - startedAtPerf))
         : endMs;
+    face.checkpoint();
     const pending = integrity.pendingEvents();
     const req: SubmitTurnRequest = {
       interviewId: attemptId,
@@ -330,7 +341,7 @@ export function InterviewScreen({
       endMs,
       ...(artifact ? { artifacts: [artifact] } : {}),
       integrityEvents: pending,
-      faceSignals,
+      faceSignals: face.currentAvailability(),
     };
     try {
       const next = await driver.submit(req);
@@ -849,11 +860,64 @@ export function InterviewScreen({
       </div>
 
       <aside className="flex min-w-0 flex-col gap-5">
+        {faceSignalsEnabled && driver.mode !== "fixture" && (
+          <section className="nb-card flat space-y-2 p-4 text-sm" aria-label="Camera preview">
+            <h2 className="font-black">Your camera</h2>
+            {/* Frames have no audio or captions; this is only the local camera preview. */}
+            <video
+              ref={face.attachVideo}
+              autoPlay
+              muted
+              playsInline
+              aria-label="Live camera preview"
+              className={`aspect-video w-full rounded-lg bg-black object-cover ${face.previewOn ? "" : "hidden"}`}
+              style={{ transform: "scaleX(-1)" }}
+            />
+            <p aria-live="polite">
+              {finished
+                ? "Camera stopped."
+                : face.previewOn
+                  ? "Camera on. Video stays on your device."
+                  : face.availability.reason}
+            </p>
+            {!finished && !face.availability.available && (
+              <>
+                {face.previewOn && <p className="text-gray-600">{face.availability.reason}</p>}
+                <NbButton size="sm" onClick={face.retry}>
+                  {face.previewOn ? "Retry face signals" : "Enable camera / Retry camera"}
+                </NbButton>
+                <p className="text-gray-600">
+                  If access was blocked, allow Camera in Chrome’s site settings, then retry. Chrome
+                  reuses permission already granted.
+                </p>
+              </>
+            )}
+            {face.observation && !finished && (
+              <p aria-live="polite" className="font-bold">
+                {face.observation.faces === 0
+                  ? "Face not visible"
+                  : face.observation.faces > 1
+                    ? "Multiple faces detected"
+                    : face.observation.away
+                      ? "Looking away detected"
+                      : "One face visible, facing the screen"}
+              </p>
+            )}
+            {!finished && (
+              <p className="text-gray-600">
+                Sustained signals are saved when you return or send your answer.
+              </p>
+            )}
+            <p className="text-gray-600">
+              Only derived face signals reach the report. No video is recorded or uploaded.
+            </p>
+          </section>
+        )}
         <WhyThisQuestion reply={reply} plan={plan} />
         <MonitoringStatus
           tabBlurs={integrity.tabBlurCount}
           pastes={integrity.pasteCount}
-          faceSignals={faceSignals}
+          faceSignals={face.availability}
         />
         <TranscriptHistory turns={reply.record.turns} currentId={question.id} />
       </aside>

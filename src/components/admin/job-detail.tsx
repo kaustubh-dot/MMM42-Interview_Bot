@@ -1,11 +1,11 @@
 "use client";
 
 import { ScoreMeter } from "@/components/pipeline/report/score-section";
-import { Explainer, NbButton, NbLinkButton, SectionHeading } from "@/components/pipeline/ui";
+import { NbButton, NbLinkButton } from "@/components/pipeline/ui";
 import { FIT_RULE, type FitSummary, type RankedEntry, rankByEvidence } from "@/lib/admin/insights";
 import { toCsv } from "@/lib/admin/invite";
-import type { AdminCandidate, HiringDecision } from "@/lib/admin/types";
-import { Download, Trash2, Trophy } from "lucide-react";
+import type { AdminCandidate } from "@/lib/admin/types";
+import { Download, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -14,8 +14,11 @@ import {
   ConcernPill,
   DECISION_META,
   DecisionPill,
+  EmptyRow,
   FitBar,
   KindPill,
+  PageHeader,
+  Panel,
   StatusPill,
   downloadFile,
   formatWhen,
@@ -23,29 +26,6 @@ import {
 } from "./admin-ui";
 
 const MAX_COMPARE = 3;
-
-const BOARD: { key: string; title: string; match: (c: AdminCandidate) => boolean }[] = [
-  {
-    key: "scheduled",
-    title: "Scheduled",
-    match: (c) => c.decision === "undecided" && c.status === "scheduled",
-  },
-  {
-    key: "in_progress",
-    title: "Interviewing",
-    match: (c) => c.decision === "undecided" && c.status === "in_progress",
-  },
-  {
-    key: "review",
-    title: "Awaiting your call",
-    match: (c) => c.decision === "undecided" && c.status === "completed",
-  },
-  ...(["advance", "hold", "reject"] as HiringDecision[]).map((d) => ({
-    key: d,
-    title: DECISION_META[d].label,
-    match: (c: AdminCandidate) => c.decision === d,
-  })),
-];
 
 export function JobDetail({ jobId }: { jobId: string }) {
   const router = useRouter();
@@ -68,7 +48,6 @@ export function JobDetail({ jobId }: { jobId: string }) {
   const pool = state.candidates.filter((c) => c.jobId === job.id);
   const { ranked, unranked } = rankByEvidence(pool, (c) => reports[c.interviewId] ?? null);
   const leader = ranked[0];
-  const expired = pool.filter((c) => c.status === "unavailable" && c.decision === "undecided");
 
   const toggleCompare = (id: string) =>
     setCompare((cur) =>
@@ -133,82 +112,76 @@ export function JobDetail({ jobId }: { jobId: string }) {
   const compared = ranked.filter((r) => compare.includes(r.item.id));
 
   return (
-    <div className="space-y-10">
-      <header className="space-y-4">
-        <div className="flex flex-wrap items-start gap-4">
-          <div className="min-w-0 flex-1 space-y-1">
-            <Link href="/admin/jobs" className="nb-link text-sm font-bold">
-              ← All jobs
-            </Link>
-            <h1 className="text-3xl font-black tracking-tight md:text-4xl">{job.title}</h1>
-            <p className="text-gray-600">
-              {pool.length} candidate{pool.length === 1 ? "" : "s"} · {ranked.length} interviewed ·
-              created {formatWhen(job.createdAt)}
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-3">
-            <NbButton size="sm" onClick={exportCsv} disabled={pool.length === 0}>
-              <Download className="h-4 w-4" /> Export CSV
+    <div className="space-y-5">
+      <PageHeader
+        back={
+          <Link href="/admin/jobs" className="nb-link text-sm font-semibold">
+            ← Jobs
+          </Link>
+        }
+        title={job.title}
+        subtitle={`${pool.length} candidate${pool.length === 1 ? "" : "s"} · ${ranked.length} interviewed`}
+        actions={
+          <>
+            <NbButton onClick={exportCsv} disabled={pool.length === 0} title="Export CSV">
+              <Download className="h-4 w-4" /> CSV
             </NbButton>
-            <NbButton size="sm" onClick={remove} aria-label="Delete job">
+            <NbButton onClick={remove} aria-label="Delete job" title="Delete job">
               <Trash2 className="h-4 w-4" />
             </NbButton>
             <NbLinkButton
               href={`/admin/schedule?job=${encodeURIComponent(job.id)}`}
               variant="primary"
-              size="sm"
             >
-              Schedule a candidate
+              Schedule candidate
             </NbLinkButton>
-          </div>
-        </div>
-        <details className="nb-card flat p-4">
-          <summary className="cursor-pointer font-bold">Job description</summary>
-          <p className="mt-3 whitespace-pre-wrap text-sm text-gray-800">{job.jdText}</p>
-        </details>
-      </header>
+          </>
+        }
+      />
 
-      {leader && <LeaderCard entry={leader} tied={ranked[1]?.position === leader.position} />}
+      {leader && (
+        <p className="nb-card nb-bg-soft-lavender px-4 py-2.5 text-sm">
+          🏆 <strong>Strongest evidence so far:</strong>{" "}
+          <Link href={`/admin/candidates/${leader.item.id}`} className="nb-link font-semibold">
+            {leader.item.name}
+          </Link>{" "}
+          — fit {pct(leader.summary.fit)}, {leader.summary.assessed}/{leader.summary.topics.length}{" "}
+          topics cited
+          {ranked[1]?.position === leader.position ? " (tied)" : ""}. A starting point, not a
+          decision.
+        </p>
+      )}
 
-      <section className="space-y-4" aria-labelledby="ranking">
-        <SectionHeading
-          title={<span id="ranking">Ranking by evidence</span>}
-          subtitle="Tick up to three candidates to compare them side by side."
-        />
-        <Explainer title="How is this ranked?">
-          <p>{FIT_RULE}</p>
-          <p>
-            Candidates are asked about their own resumes, so their topics differ. Compare the
-            quotes, not just the number. The ranking is a starting point for your judgment, never a
-            decision.
-          </p>
-        </Explainer>
+      <Panel
+        title="Ranking by evidence"
+        actions={
+          compare.length > 0 && (
+            <span className="text-xs text-gray-600">
+              {compare.length < 2 ? "Tick one more to compare" : `Comparing ${compare.length}`}
+            </span>
+          )
+        }
+      >
         {ranked.length === 0 ? (
-          <p className="nb-card flat p-4 text-gray-700">
-            No finished interviews yet. Rankings appear here as candidates complete them.
-          </p>
+          <EmptyRow>No finished interviews yet. Rankings appear as candidates finish.</EmptyRow>
         ) : (
-          <div className="nb-card overflow-x-auto">
-            <table className="w-full min-w-[820px] text-left text-sm">
-              <thead className="border-b-2 border-[#111] bg-[#f3f3f3]">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[720px] text-left text-sm">
+              <thead className="bg-[#f7f7f7]">
                 <tr>
-                  <th className="p-3">Compare</th>
-                  <th className="p-3">#</th>
-                  <th className="p-3">Candidate</th>
-                  <th className="p-3">Fit</th>
-                  <th className="p-3">Coverage</th>
-                  <th className="p-3">Needs a look</th>
-                  <th className="p-3">Strongest topic</th>
-                  <th className="p-3" title="Shown for human review only. Not used in the ranking.">
-                    Integrity*
-                  </th>
-                  <th className="p-3">Decision</th>
+                  <th className="w-10 px-3 py-2" aria-label="Compare" />
+                  <th className="px-3 py-2">#</th>
+                  <th className="px-3 py-2">Candidate</th>
+                  <th className="px-3 py-2">Fit</th>
+                  <th className="px-3 py-2">Topics cited</th>
+                  <th className="px-3 py-2">Integrity*</th>
+                  <th className="px-3 py-2">Decision</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="divide-y divide-[#111]/10">
                 {ranked.map(({ item: c, summary: s, position }) => (
-                  <tr key={c.id} className="border-b border-[#111]/15 last:border-0">
-                    <td className="p-3">
+                  <tr key={c.id}>
+                    <td className="px-3 py-2">
                       <input
                         type="checkbox"
                         aria-label={`Compare ${c.name}`}
@@ -217,140 +190,68 @@ export function JobDetail({ jobId }: { jobId: string }) {
                         onChange={() => toggleCompare(c.id)}
                       />
                     </td>
-                    <td className="p-3 font-black">{position}</td>
-                    <td className="p-3">
-                      <Link href={`/admin/candidates/${c.id}`} className="nb-link font-bold">
+                    <td className="px-3 py-2 font-bold">{position}</td>
+                    <td className="px-3 py-2">
+                      <Link href={`/admin/candidates/${c.id}`} className="nb-link font-semibold">
                         {c.name}
                       </Link>{" "}
                       <KindPill kind={c.kind} />
+                      {s.needsReview > 0 && (
+                        <span className="ml-1 text-xs text-gray-500">
+                          👀 {s.needsReview} to check
+                        </span>
+                      )}
                     </td>
-                    <td className="p-3">
+                    <td className="px-3 py-2">
                       <FitBar value={s.fit} />
                     </td>
-                    <td className="p-3 font-mono">
-                      {s.assessed}/{s.topics.length} ({pct(s.coverage)})
+                    <td className="px-3 py-2 font-mono text-xs">
+                      {s.assessed}/{s.topics.length}
                     </td>
-                    <td className="p-3">{s.needsReview > 0 ? `👀 ${s.needsReview}` : "—"}</td>
-                    <td className="p-3">{s.strongest?.skillArea ?? "—"}</td>
-                    <td className="p-3">
+                    <td className="px-3 py-2">
                       <ConcernPill level={s.integrityLevel} />
                     </td>
-                    <td className="p-3">
+                    <td className="px-3 py-2">
                       <DecisionPill decision={c.decision} />
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-            <p className="border-t-2 border-[#111] p-3 text-xs text-gray-600">
-              * Integrity is a concern level to prompt human review, not a cheating determination.
-              It never changes a score or the order above.
+            <p className="border-t border-[#111]/10 px-4 py-2 text-xs text-gray-500">
+              {FIT_RULE} *Integrity is a concern level for human review, not a cheating
+              determination.
             </p>
           </div>
         )}
-        {compared.length >= 2 && <CompareGrid entries={compared} />}
-        {compared.length === 1 && (
-          <p className="text-sm text-gray-600">Tick one more candidate to compare.</p>
-        )}
-      </section>
+      </Panel>
 
-      <section className="space-y-4" aria-labelledby="board">
-        <SectionHeading title={<span id="board">Pipeline</span>} star="#ffc3be" />
-        <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
-          {BOARD.map((col) => {
-            const items = pool.filter(col.match);
-            return (
-              <div
-                key={col.key}
-                className="space-y-2 rounded-2xl border-2 border-[#111] bg-white/70 p-3"
-              >
-                <p className="flex items-center justify-between text-sm font-black">
-                  {col.title}
-                  <span className="nb-pill">{items.length}</span>
-                </p>
-                <ul className="space-y-2">
-                  {items.map((c) => (
-                    <li key={c.id}>
-                      <Link
-                        href={`/admin/candidates/${c.id}`}
-                        className="block rounded-xl border-2 border-[#111] bg-white p-2 text-sm font-bold hover:shadow-[3px_3px_0_#111]"
-                      >
-                        {c.name}
-                        {c.status !== "completed" && (
-                          <span className="block text-xs font-medium text-gray-600">
-                            {formatWhen(c.scheduledAt)}
-                          </span>
-                        )}
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            );
-          })}
-        </div>
-        {expired.length > 0 && (
-          <p className="text-sm text-gray-600">
-            Expired links (server restarted before the interview finished):{" "}
-            {expired.map((c, i) => (
-              <span key={c.id}>
-                {i > 0 && ", "}
-                <Link className="nb-link" href={`/admin/candidates/${c.id}`}>
-                  {c.name}
-                </Link>
-              </span>
-            ))}
-          </p>
-        )}
-      </section>
+      {compared.length >= 2 && <CompareGrid entries={compared} />}
 
       {unranked.length > 0 && (
-        <section className="space-y-3">
-          <SectionHeading title="Not interviewed yet" />
-          <ul className="grid gap-3 md:grid-cols-2">
+        <Panel title="Not interviewed yet">
+          <ul className="divide-y divide-[#111]/10">
             {unranked.map((c) => (
               <li key={c.id}>
                 <Link
                   href={`/admin/candidates/${c.id}`}
-                  className="nb-card flat hoverable flex flex-wrap items-center gap-2 p-3"
+                  className="flex flex-wrap items-center gap-3 px-4 py-2.5 hover:bg-[#fafafa]"
                 >
-                  <span className="flex-1 font-bold">{c.name}</span>
+                  <span className="flex-1 font-semibold">{c.name}</span>
+                  <span className="text-xs text-gray-600">{formatWhen(c.scheduledAt)}</span>
                   <StatusPill status={c.status} />
                 </Link>
               </li>
             ))}
           </ul>
-        </section>
+        </Panel>
       )}
-    </div>
-  );
-}
 
-function LeaderCard({ entry, tied }: { entry: RankedEntry<AdminCandidate>; tied: boolean }) {
-  const { item: c, summary: s } = entry;
-  return (
-    <section className="nb-card nb-bg-soft-lavender flex flex-wrap items-center gap-5 p-6">
-      <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border-2 border-[#111] bg-white shadow-[3px_3px_0_#111]">
-        <Trophy className="h-7 w-7" />
-      </span>
-      <div className="min-w-0 flex-1 space-y-1">
-        <p className="text-sm font-bold uppercase tracking-wide text-gray-600">
-          Strongest evidence so far{tied ? " (tied)" : ""}
-        </p>
-        <p className="text-2xl font-black">{c.name}</p>
-        <p className="text-gray-800">
-          Fit {pct(s.fit)} with {s.assessed} of {s.topics.length} topics backed by quotes
-          {s.strongest ? `, strongest in ${s.strongest.skillArea}` : ""}.
-          {s.needsReview > 0
-            ? ` ${s.needsReview} score${s.needsReview === 1 ? "" : "s"} still need a human look.`
-            : ""}
-          {s.biggestGap ? ` Biggest gap: ${s.biggestGap.skillArea}.` : ""}
-        </p>
-      </div>
-      <NbLinkButton href={`/admin/candidates/${c.id}`} variant="primary">
-        Review & decide
-      </NbLinkButton>
-    </section>
+      <details className="text-sm">
+        <summary className="cursor-pointer font-semibold text-gray-700">Job description</summary>
+        <p className="mt-2 whitespace-pre-wrap text-gray-700">{job.jdText}</p>
+      </details>
+    </div>
   );
 }
 
@@ -369,32 +270,32 @@ function CompareGrid({ entries }: { entries: RankedEntry<AdminCandidate>[] }) {
   return (
     <div className="nb-card overflow-x-auto" aria-label="Side-by-side comparison">
       <table className="w-full min-w-[640px] table-fixed text-left text-sm">
-        <thead className="border-b-2 border-[#111] bg-[#f3f3f3]">
+        <thead className="bg-[#f7f7f7]">
           <tr>
-            <th className="w-40 p-3">Topic</th>
+            <th className="w-40 px-3 py-2">Topic</th>
             {entries.map((e) => (
-              <th key={e.item.id} className="p-3">
+              <th key={e.item.id} className="px-3 py-2">
                 #{e.position} {e.item.name}
               </th>
             ))}
           </tr>
         </thead>
         <tbody>
-          <tr className="border-b border-[#111]/15">
-            <td className="p-3 font-bold">Fit</td>
+          <tr className="border-b border-[#111]/10">
+            <td className="px-3 py-2 font-bold">Fit</td>
             {entries.map((e) => (
-              <td key={e.item.id} className="p-3">
+              <td key={e.item.id} className="px-3 py-2">
                 <FitBar value={e.summary.fit} />
               </td>
             ))}
           </tr>
           {areas.map(([key, label]) => (
-            <tr key={key} className="border-b border-[#111]/15 align-top">
-              <td className="p-3 font-bold">{label}</td>
+            <tr key={key} className="border-b border-[#111]/10 align-top">
+              <td className="px-3 py-2 font-bold">{label}</td>
               {entries.map((e) => {
                 const t = topicFor(e.summary, key);
                 return (
-                  <td key={e.item.id} className="space-y-1 p-3">
+                  <td key={e.item.id} className="space-y-1 px-3 py-2">
                     {!t ? (
                       <span className="text-gray-400">Not on their resume</span>
                     ) : t.score === null ? (
@@ -418,9 +319,9 @@ function CompareGrid({ entries }: { entries: RankedEntry<AdminCandidate>[] }) {
             </tr>
           ))}
           <tr>
-            <td className="p-3 font-bold">Integrity*</td>
+            <td className="px-3 py-2 font-bold">Integrity*</td>
             {entries.map((e) => (
-              <td key={e.item.id} className="p-3">
+              <td key={e.item.id} className="px-3 py-2">
                 <ConcernPill level={e.summary.integrityLevel} />
               </td>
             ))}

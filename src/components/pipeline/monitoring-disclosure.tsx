@@ -137,7 +137,7 @@ export function MonitoringDisclosure({
               <li>
                 •{" "}
                 {faceSignalsEnabled
-                  ? "Rough camera signals (is a face visible, is more than one face in view). They are processed in your browser, never uploaded, and are not eye tracking."
+                  ? "With camera permission, we notice sustained face absence, multiple faces and an approximate looking-away signal from head and eye direction. A live preview shows when the camera is on. Video stays on your device and is never recorded or uploaded. If camera signals fail or you deny permission, the interview continues and those signals are marked unavailable."
                   : "Camera signals are off for this interview."}
               </li>
             </ul>

@@ -93,11 +93,20 @@ export async function createPlan(input: {
   jd?: File;
   /** FoloUp role (interview.id) from a /interview?role= link; files the attempt under it. */
   roleId?: string;
+  /** Stored on the response row for recruiters; never sent to scoring. */
+  candidateName?: string;
+  candidateEmail?: string;
 }): Promise<ClientInterviewPlan> {
   const form = new FormData();
   form.append("resume", input.resume);
   if (input.roleId) {
     form.append("roleId", input.roleId);
+  }
+  if (input.candidateName) {
+    form.append("candidateName", input.candidateName);
+  }
+  if (input.candidateEmail) {
+    form.append("candidateEmail", input.candidateEmail);
   }
   if (input.jd) {
     form.append("jd", input.jd);

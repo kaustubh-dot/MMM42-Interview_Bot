@@ -4,12 +4,7 @@ import { useInterviewSpeech } from "@/hooks/use-interview-speech";
 import { useEffect, useMemo, useState } from "react";
 import { newRequestId } from "./api-client";
 import { ClaimsView } from "./claims-view";
-import type {
-  ClientInterviewPlan,
-  ClientInterviewReport,
-  FaceSignalAvailability,
-  TurnReply,
-} from "./contract";
+import type { ClientInterviewPlan, ClientInterviewReport, TurnReply } from "./contract";
 import { type InterviewDriver, createFixtureDriver, createLiveDriver } from "./interview-driver";
 import { InterviewScreen } from "./interview-screen";
 import { MonitoringDisclosure } from "./monitoring-disclosure";
@@ -40,13 +35,6 @@ interface ActiveAttempt {
 }
 
 const FACE_FLAG_ON = process.env.NEXT_PUBLIC_FACE_SIGNALS === "on";
-
-// TODO(C + D): replace with D's use-face-signals hook result when it lands. Until then the
-// signals are reported as unavailable, which contributes zero points.
-const FACE_SIGNALS: FaceSignalAvailability = {
-  available: false,
-  reason: FACE_FLAG_ON ? "camera capture not connected yet" : "off for this interview",
-};
 
 function readActive(): ActiveAttempt | null {
   try {
@@ -209,7 +197,7 @@ export function InterviewApp({ sample, roleId }: Props) {
 
         {phase === "disclosure" && (
           <MonitoringDisclosure
-            faceSignalsEnabled={FACE_SIGNALS.available}
+            faceSignalsEnabled={FACE_FLAG_ON && mode !== "fixture"}
             speechSupported={speechProbe.supported.recognition}
             onBack={() => setPhase("claims")}
             onStart={() => {
@@ -237,7 +225,7 @@ export function InterviewApp({ sample, roleId }: Props) {
               key={`${mode}:${plan.interviewId}:${runKey}`}
               driver={driver}
               plan={plan}
-              faceSignals={FACE_SIGNALS}
+              faceSignalsEnabled={FACE_FLAG_ON}
               resume={resuming}
               onFinished={(r) => {
                 writeActive(null);
