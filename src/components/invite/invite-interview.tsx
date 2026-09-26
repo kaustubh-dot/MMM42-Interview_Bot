@@ -127,9 +127,7 @@ export function InviteInterview({
   return (
     <div className="nb-orbs min-h-[calc(100vh-5rem)]">
       <div className="mx-auto max-w-7xl space-y-6 px-4 py-8 md:px-6">
-        {demo && phase.kind !== "done" && (
-          <DemoBadge>Demo interview: sample resume, demo grader</DemoBadge>
-        )}
+        {demo && phase.kind !== "done" && <DemoBadge>Practice interview: sample resume</DemoBadge>}
 
         {phase.kind === "loading" && (
           <div className="nb-card mx-auto flex max-w-md items-center justify-center gap-3 p-8 font-medium">

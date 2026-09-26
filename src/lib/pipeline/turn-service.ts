@@ -3,6 +3,7 @@ import "server-only";
 import { goldenReport } from "../../fixtures/golden-interview";
 import type { AnswerArtifact, IntegrityEvent } from "../../types/pipeline";
 import type { StartRequest, SubmitTurnRequest, TurnReply } from "../../types/pipeline-api";
+import { LlmError } from "../llm";
 import { redactIdentityText } from "../prompts/pipeline/blind";
 import { toClientRecord } from "./client-projection";
 import { type GradeAnswer, advanceInterview, createOpeningSession } from "./engine";
@@ -179,11 +180,11 @@ export async function startAttempt(
       }
       throw new PipelineError("ALREADY_STARTED", "This attempt has already started.", 409);
     }
-    if (process.env.LLM_MODE !== "mock") {
+    if (!["mock", "groq", "gemini"].includes(process.env.LLM_MODE ?? "")) {
       throw new PipelineError(
-        "UNKNOWN_ATTEMPT",
-        "Generate a plan before starting this attempt.",
-        404,
+        "LLM_CONFIGURATION",
+        "Configure an AI provider before starting the interview.",
+        503,
       );
     }
     if (
@@ -192,7 +193,7 @@ export async function startAttempt(
     ) {
       throw new PipelineError(
         "UNKNOWN_ATTEMPT",
-        "No plan exists for this attempt. Use a mock-* ID in mock mode.",
+        "No plan exists for this attempt. Generate a plan or start a sample-resume interview.",
         404,
       );
     }
@@ -236,19 +237,32 @@ export async function submitCandidateTurn(
       throw new PipelineError("REQUEST_ID_REUSED", "Use a new request ID for the answer.", 409);
     }
     const identities = planIdentities(request.interviewId);
-    // Keep A2's explicitly labeled demo path separate. Planned interviews use B's real adapter,
-    // whose mock mode accepts only its documented golden inputs.
+    // Only explicit offline mock mode uses the demo grader. Sample-resume attempts also
+    // use real AI when a live provider is configured.
     const selectedGrader =
       grader ??
-      (identities === null
+      (identities === null && process.env.LLM_MODE === "mock"
         ? mockGradeAnswer
         : async (input) =>
             gradeAnswer({
               ...input,
-              questionText: redactIdentityText(input.questionText, identities),
-              answerText: redactIdentityText(input.answerText, identities),
+              questionText: redactIdentityText(input.questionText, identities ?? []),
+              answerText: redactIdentityText(input.answerText, identities ?? []),
             }));
-    const { session, reply } = await advanceInterview(current, request, selectedGrader);
+    const { session, reply } = await advanceInterview(current, request, async (input) => {
+      try {
+        return await selectedGrader(input);
+      } catch (error) {
+        if (error instanceof LlmError) {
+          throw new PipelineError(
+            "GRADER_UNAVAILABLE",
+            "AI grading is unavailable. Retry your answer.",
+            502,
+          );
+        }
+        throw error;
+      }
+    });
     if (session !== current) {
       await store.saveSession(session, current.lastRequestId);
     }

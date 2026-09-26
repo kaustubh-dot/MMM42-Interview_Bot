@@ -9,6 +9,7 @@ export default async function InterviewPage({ searchParams }: Props) {
   const { role } = await searchParams;
   return (
     <InterviewApp
+      liveAi={process.env.LLM_MODE === "groq" || process.env.LLM_MODE === "gemini"}
       sample={clientGoldenReport}
       roleId={typeof role === "string" && role ? role : undefined}
     />

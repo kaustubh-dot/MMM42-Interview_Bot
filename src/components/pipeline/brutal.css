@@ -161,15 +161,17 @@
 .nb-input {
   width: 100%;
   background: var(--nb-input);
-  border: 2px solid transparent;
-  border-radius: 1rem;
-  padding: 0.9rem 1rem;
+  border: 1px solid #d6d6dc;
+  border-radius: 0.5rem;
+  padding: 0.55rem 0.75rem;
   font-size: 1rem;
   outline: none;
-  transition: border-color 0.2s;
+  line-height: 1.5;
+  transition: border-color 0.2s, box-shadow 0.2s;
 }
 .nb-input:focus {
-  border-color: var(--nb-lavender);
+  border-color: var(--nb-indigo);
+  box-shadow: 0 0 0 2px #b6b7fd55;
   background: #fff;
 }
 

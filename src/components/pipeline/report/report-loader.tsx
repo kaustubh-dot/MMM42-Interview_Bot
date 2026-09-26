@@ -65,7 +65,7 @@ export function ReportLoader({ interviewId }: { interviewId: string }) {
         <NbButton variant="primary" onClick={load}>
           Try again
         </NbButton>
-        <NbLinkButton href="/report/sample">See the sample report</NbLinkButton>
+        <NbLinkButton href="/interview">Back to interviews</NbLinkButton>
       </div>
     </div>
   );

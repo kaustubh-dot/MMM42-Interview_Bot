@@ -127,9 +127,6 @@ export function ReportView({ report, fixture }: Props) {
             <NbLinkButton href="/interview" size="sm" variant="primary">
               New interview
             </NbLinkButton>
-            <NbLinkButton href="/report/workspace-samples" size="sm">
-              Saved code &amp; drawings
-            </NbLinkButton>
           </span>
         </nav>
 

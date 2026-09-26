@@ -11,7 +11,6 @@ const LINKS = [
   { href: "/", label: "Home" },
   { href: "/#how-it-works", label: "How it works" },
   { href: "/practice", label: "Practice" },
-  { href: "/report/sample", label: "Sample report" },
 ];
 const RECRUITER_LINK = { href: "/admin", label: "Recruiters" };
 
@@ -128,12 +127,6 @@ export function AppFooter() {
           </Link>
           <Link className="nb-link" href="/practice/playground">
             Editor &amp; whiteboard playground
-          </Link>
-          <Link className="nb-link" href="/report/sample">
-            Sample report
-          </Link>
-          <Link className="nb-link" href="/report/workspace-samples">
-            Saved code &amp; drawings
           </Link>
         </div>
       </div>

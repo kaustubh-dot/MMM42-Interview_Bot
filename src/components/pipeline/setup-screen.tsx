@@ -7,6 +7,7 @@ import type { ClientInterviewPlan } from "./contract";
 import { Explainer, NbButton } from "./ui";
 
 interface Props {
+  liveAi?: boolean;
   /** FoloUp role from a /interview?role= link. */
   roleId?: string;
   onPlan: (plan: ClientInterviewPlan) => void;
@@ -52,7 +53,7 @@ function FilePicker({
   );
 }
 
-export function SetupScreen({ roleId, onPlan, onUseSample }: Props) {
+export function SetupScreen({ roleId, onPlan, onUseSample, liveAi = false }: Props) {
   const [demoWorkspace, setDemoWorkspace] = useState<"code" | "whiteboard">("code");
   const [resume, setResume] = useState<File | null>(null);
   const [jdFile, setJdFile] = useState<File | null>(null);
@@ -132,7 +133,8 @@ export function SetupScreen({ roleId, onPlan, onUseSample }: Props) {
           <h2 className="text-2xl font-black">Demo interview</h2>
           <p className="text-gray-700">
             No upload needed. You play a backend-engineer candidate on a sample resume. The real
-            interview engine picks each question from your answers, using its demo grader.
+            interview engine picks each question from your answers, using{" "}
+            {liveAi ? "AI grading" : "its demo grader"}.
           </p>
           <ul className="space-y-1 text-sm text-gray-700">
             <li>✓ Voice conversation with follow-ups and interruptions</li>
@@ -140,8 +142,9 @@ export function SetupScreen({ roleId, onPlan, onUseSample }: Props) {
             <li>✓ Ends with a report built from your answers</li>
           </ul>
           <p className="rounded-xl border-2 border-[#111] bg-white p-3 text-xs text-gray-700">
-            Demo grader: the sample answers ("Answer for me") get their recorded grades and any
-            other answer counts as 1/3. It shows the flow; it isn't a real assessment.
+            {liveAi
+              ? "AI reviews your answers and builds a report from your own words. The resume and question ladder are provided so you can start immediately."
+              : 'Demo grader: the sample answers ("Answer for me") get their recorded grades and any other answer counts as 1/3. It shows the flow; it is not a real assessment.'}
           </p>
           <fieldset
             className="flex flex-wrap items-center gap-2 text-sm"

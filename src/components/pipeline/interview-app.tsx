@@ -5,20 +5,19 @@ import { useEffect, useMemo, useState } from "react";
 import { newRequestId } from "./api-client";
 import { ClaimsView } from "./claims-view";
 import type { ClientInterviewPlan, ClientInterviewReport, TurnReply } from "./contract";
-import { type InterviewDriver, createFixtureDriver, createLiveDriver } from "./interview-driver";
+import { type InterviewDriver, createLiveDriver } from "./interview-driver";
 import { InterviewScreen } from "./interview-screen";
 import { MonitoringDisclosure } from "./monitoring-disclosure";
 import { SetupScreen } from "./setup-screen";
 import { ArtifactReview } from "./technical-workspace";
-import { DemoBadge, NbButton, NbLinkButton, StepTracker } from "./ui";
+import { NbButton, NbLinkButton, StepTracker } from "./ui";
 
 type Phase = "setup" | "claims" | "disclosure" | "interview";
 /**
  * live:    plan generated from the candidate's resume + JD (A3 /plan).
- * demo:    the real turn API in the server's mock mode (A2 `mock-*` attempts on the sample plan).
- * fixture: offline replay of the recorded sample, used only if the server can't run the demo.
+ * demo:    sample-resume questions with the configured server grader.
  */
-type Mode = "live" | "demo" | "fixture";
+type Mode = "live" | "demo";
 const PHASE_STEP: Record<Phase, number> = { setup: 0, claims: 1, disclosure: 2, interview: 3 };
 const ACTIVE_KEY = "mmm42:active-attempt";
 
@@ -27,6 +26,7 @@ interface Props {
   sample: ClientInterviewReport;
   /** FoloUp role (interview.id) from /interview?role=; the saved response is listed under it. */
   roleId?: string;
+  liveAi?: boolean;
 }
 
 interface ActiveAttempt {
@@ -82,7 +82,7 @@ function demoPlan(
   };
 }
 
-export function InterviewApp({ sample, roleId }: Props) {
+export function InterviewApp({ sample, roleId, liveAi = false }: Props) {
   const [phase, setPhase] = useState<Phase>("setup");
   const [plan, setPlan] = useState<ClientInterviewPlan | null>(null);
   const [mode, setMode] = useState<Mode>("live");
@@ -103,16 +103,10 @@ export function InterviewApp({ sample, roleId }: Props) {
     if (!plan) {
       return null;
     }
-    if (mode === "fixture") {
-      return createFixtureDriver(sample);
-    }
     return createLiveDriver(plan.interviewId, mode === "demo" ? sample : undefined, roleId);
   }, [plan, mode, sample, roleId, runKey]);
 
-  const reportHref =
-    mode === "fixture" || !plan
-      ? "/report/sample"
-      : `/report/${encodeURIComponent(plan.interviewId)}`;
+  const reportHref = plan ? `/report/${encodeURIComponent(plan.interviewId)}` : "/interview";
   const step = finalReply ? 4 : PHASE_STEP[phase];
 
   const restart = () => {
@@ -128,11 +122,6 @@ export function InterviewApp({ sample, roleId }: Props) {
       <div className="mx-auto max-w-7xl space-y-6 px-4 py-8 md:px-6">
         <div className="flex flex-wrap items-center gap-3">
           <StepTracker current={step} />
-          {mode === "fixture" && phase !== "setup" && (
-            <DemoBadge>
-              Offline sample replay: questions are pre-recorded, answers not graded
-            </DemoBadge>
-          )}
         </div>
 
         {phase === "setup" && pendingResume && (
@@ -168,6 +157,7 @@ export function InterviewApp({ sample, roleId }: Props) {
 
         {phase === "setup" && (
           <SetupScreen
+            liveAi={liveAi}
             roleId={roleId}
             onPlan={(p) => {
               setMode("live");
@@ -197,13 +187,13 @@ export function InterviewApp({ sample, roleId }: Props) {
 
         {phase === "disclosure" && (
           <MonitoringDisclosure
-            faceSignalsEnabled={FACE_FLAG_ON && mode !== "fixture"}
+            faceSignalsEnabled={FACE_FLAG_ON}
             speechSupported={speechProbe.supported.recognition}
             onBack={() => setPhase("claims")}
             onStart={() => {
               setFinalReply(null);
               setResuming(false);
-              if (plan && mode !== "fixture") {
+              if (plan) {
                 writeActive({ interviewId: plan.interviewId, mode });
               }
               setPhase("interview");
@@ -216,7 +206,7 @@ export function InterviewApp({ sample, roleId }: Props) {
             {finalReply && (
               <DonePanel
                 reply={finalReply}
-                mode={mode}
+                mode={liveAi ? "live" : mode}
                 reportHref={reportHref}
                 onRestart={restart}
               />
@@ -231,16 +221,6 @@ export function InterviewApp({ sample, roleId }: Props) {
                 writeActive(null);
                 setFinalReply(r);
               }}
-              onFallback={
-                mode === "demo"
-                  ? () => {
-                      writeActive(null);
-                      setMode("fixture");
-                      setPlan(sample.record.plan);
-                      setRunKey((k) => k + 1);
-                    }
-                  : undefined
-              }
             />
           </>
         )}
@@ -262,18 +242,16 @@ function DonePanel({
 }) {
   const submitted = reply.record.turns.filter((t) => t.artifacts?.length);
   const message =
-    mode === "fixture"
-      ? "That was the offline replay. The sample report shows how the recorded candidate was scored, with every score linked to their exact words."
-      : mode === "demo"
-        ? "That was the demo. Your report is built from your own answers, graded by the demo grader, so treat the scores as a walkthrough rather than an assessment."
-        : "Your answers are in. The report is ready for the reviewer.";
+    mode === "demo"
+      ? "That was the demo. Your report is built from your own answers, graded by the demo grader, so treat the scores as a walkthrough rather than an assessment."
+      : "Your answers are in. The report is ready for the reviewer.";
   return (
     <section className="nb-card nb-bg-soft-lavender space-y-4 p-6">
       <h2 className="text-2xl font-black">🎉 Interview complete!</h2>
       <p className="text-gray-800">{message}</p>
       <div className="flex flex-wrap gap-3">
         <NbLinkButton href={reportHref} variant="primary" size="lg">
-          {mode === "fixture" ? "See the sample report" : "Open the report"}
+          Open the report
         </NbLinkButton>
         <NbButton size="lg" onClick={onRestart}>
           Start over

@@ -35,7 +35,7 @@ We are building an AI interview platform on top of the FoloUp codebase (Next.js 
 
 **Not used:** Retell (replaced by our turn loop), auth (see cut list), Prisma (listed in package.json but there's no schema; don't use it).
 
-**A1 foundation:** `src/lib/llm.ts` and private fixture/projection modules use Next.js's `server-only` boundary marker. `LLM_MODE` must be set explicitly to `mock` or `gemini`; mock returns task fixture data without network access, and live mode requires `GEMINI_API_KEY`. Read [A1 handoff](docs/handoffs/a1-foundation.md) for imports, examples and checks.
+**A1 foundation:** `src/lib/llm.ts` and private fixture/projection modules use Next.js's `server-only` boundary marker. Set `LLM_MODE=groq` with `GROQ_API_KEY` (the example default), or `gemini` with `GEMINI_API_KEY`. Explicit `mock` mode is available for offline testing. Sample-resume attempts use real grading in live mode; public sample report pages are removed. Read [A1 handoff](docs/handoffs/a1-foundation.md) for imports, examples and checks.
 
 ## 3. Pillars
 

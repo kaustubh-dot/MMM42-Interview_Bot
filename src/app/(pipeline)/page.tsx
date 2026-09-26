@@ -61,18 +61,6 @@ const TRY = [
     body: "Coding, system design and SQL questions from open-source sets, with an AI tutor for hints and step-by-step help.",
     tone: "nb-bg-2",
   },
-  {
-    href: "/report/sample",
-    title: "Sample report",
-    body: "See scores, quotes, the fairness check and integrity notes.",
-    tone: "nb-bg-1",
-  },
-  {
-    href: "/report/workspace-samples",
-    title: "Saved code & drawings",
-    body: "How submitted code and whiteboard sketches look to a reviewer.",
-    tone: "nb-bg-4",
-  },
 ];
 
 function HeroMock() {
@@ -122,8 +110,8 @@ export default function HomePage() {
               <NbLinkButton href="/interview" variant="primary" size="lg">
                 Start an interview
               </NbLinkButton>
-              <NbLinkButton href="/report/sample" size="lg">
-                See a sample report
+              <NbLinkButton href="/practice" size="lg">
+                Practice with AI
               </NbLinkButton>
             </div>
             <p className="text-sm text-gray-600">

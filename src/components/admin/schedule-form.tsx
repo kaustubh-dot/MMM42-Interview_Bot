@@ -207,7 +207,7 @@ export function ScheduleForm({ initialJobId }: { initialJobId?: string }) {
                 [
                   "demo",
                   "Demo candidate",
-                  "Sample resume with the demo grader. For trying it out.",
+                  "Sample resume with the configured interview grader. For trying it out.",
                 ],
               ] as const
             ).map(([value, title, body]) => (
@@ -268,7 +268,7 @@ export function ScheduleForm({ initialJobId }: { initialJobId?: string }) {
                   {w === "code" ? "💻 Code editor" : "🖍️ Whiteboard"}
                 </button>
               ))}
-              <span className="text-gray-600">Requires the server in mock mode.</span>
+              <span className="text-gray-600">Uses AI when a live provider is configured.</span>
             </div>
           )}
         </fieldset>

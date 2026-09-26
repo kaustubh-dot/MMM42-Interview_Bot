@@ -25,8 +25,8 @@ export function WorkspaceSamplesView({ examples }: { examples: WorkspaceExample[
             <NbLinkButton href="/practice/playground" variant="primary" size="sm">
               Try the workspace yourself
             </NbLinkButton>
-            <NbLinkButton href="/report/sample" size="sm">
-              Full sample report
+            <NbLinkButton href="/interview" size="sm">
+              Start an interview
             </NbLinkButton>
           </div>
         </header>

@@ -46,7 +46,7 @@ export function KindPill({ kind }: { kind: CandidateKind }) {
       title={
         kind === "sample"
           ? "The recorded sample interview bundled with the app"
-          : "Sample resume with the demo grader (server in mock mode)"
+          : "Sample resume with the configured interview grader"
       }
     >
       {kind === "sample" ? "Sample" : "Demo"}
