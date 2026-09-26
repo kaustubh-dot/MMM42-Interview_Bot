@@ -1,5 +1,16 @@
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
+const Module = require("node:module");
+const path = require("node:path");
+// B's integrated modules use the repository alias. Resolve it to this existing TS build.
+const resolve = Module._resolveFilename;
+Module._resolveFilename = function resolveCompiledAlias(id, ...args) {
+  return resolve.call(
+    this,
+    id.startsWith("@/") ? path.join(__dirname, "../.foundation-build", id.slice(2)) : id,
+    ...args,
+  );
+};
 const golden = require("../fixtures/golden-interview.json");
 const { workspaceExamples } = require("../.foundation-build/fixtures/workspace-interview.js");
 
@@ -15,6 +26,21 @@ function area(overrides = {}) {
     ...overrides,
   };
 }
+
+test("plan openings reject a generic tool definition despite exact resume word overlap", () => {
+  const { validatePlan } = require("../.foundation-build/lib/pipeline/plan.js");
+  const draft = structuredClone(golden.record.plan);
+  const resume = draft.claims.map((claim) => claim.resumeEvidence).join("\n");
+  const jd = draft.claims.map((claim) => claim.jdRequirement).join("\n");
+  for (const claim of draft.claims) {
+    if (claim.isTechnical && !claim.ladder.codeSnippet) {
+      claim.ladder.workspace = { kind: "whiteboard", prompt: claim.ladder.scenarioTwist };
+    }
+  }
+  assert.equal(validatePlan(draft, resume, jd).plan.claims.length, 4);
+  draft.claims[0].ladder.initial = "What is PostgreSQL?";
+  assert.throws(() => validatePlan(draft, resume, jd), { code: "PLAN_INVALID" });
+});
 
 test("pure selector matches every golden transition without mutating area state", () => {
   const { selectNext } = require("../.foundation-build/lib/pipeline/select-next.js");

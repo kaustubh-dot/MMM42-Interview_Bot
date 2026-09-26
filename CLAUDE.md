@@ -1,7 +1,7 @@
 # CLAUDE.md: source of truth for the hackathon build
 
 > If code and this file disagree, that is a bug. Fix whichever one is wrong, in the same change.
-> Last updated: 2026-09-26, A2 engine/API mock demo implemented on `feat/interview-engine` after A1 merge `97838f2`. Shared contracts are unchanged. B's live grader and D's durable persistence are pending; see [A2 handoff](docs/handoffs/a2-interview-engine.md).
+> Last updated: 2026-09-26. A2 PR #4 is merged (`383068c`); A3 plan/report orchestration is implemented on `feat/interview-engine` using B's merged modules. Shared contracts are unchanged. Storage remains mock memory; see [A3 handoff](docs/handoffs/a3-plan-report.md).
 > Assignment checklist: [Team implementation plan](docs/superpowers/plans/2026-09-26-team-kickoff.md). A, B and C start now; D joins later. Planned additions below are requirements, not claims of implemented behavior.
 
 ## 1. Summary
@@ -46,11 +46,11 @@ Status values: `not started` → `in progress` → `demo path works` → `done`.
   - Coding workspaces get a `codeSnippet` with a planted issue; whiteboard workspaces get a concrete system-design prompt.
   - Ranking is `jdWeight × (1 − specificity)`: vague claims about things the JD needs are probed first.
   - The first question must name a concrete resume detail and ask about mechanism, trade-off or failure. Reject "tell me about X".
-- **Status:** not started. The fixture plan exists in `src/fixtures/golden-interview.ts`.
+- **Status:** demo path works. A3 parses resume/JD PDFs, validates grounded claims/ladders/workspaces, and ranks in code. The complete mock PDF → interview → report path works; real Gemini planning is wired but has not been exercised with credentials.
 
 ### Pillar 2: Adaptive interview engine. Owner: **A** (B supports with the grader)
 - **Done looks like:** a spoken interview in Chrome. Each turn: STT → a grade call scores the answer 0–3 on the shared rubric → the pure function `selectNext()` applies the rule → the question text comes from the precomputed ladder (the LLM only fills `{{term}}` / `{{quote}}`) → TTS. Every turn appends a `Decision` with a `ReasonCode`, and a live decision-log panel shows them.
-- **Status:** demo path works. A2's pure selector matches the reference in `scripts/build-golden-fixture.mjs`; start/turn/session APIs use explicitly labeled fixture grading and process-memory storage. B's live grading and C's spoken browser flow remain pending. See [A2 handoff](docs/handoffs/a2-interview-engine.md).
+- **Status:** demo path works. A2's deterministic engine now calls B's grader for A3 planned attempts. The legacy A2 demo entry retains labeled fixture grading. C's spoken browser flow and D's persistence remain integration work. See [A3 handoff](docs/handoffs/a3-plan-report.md).
 
 ### Pillar 3: Evidence-grounded evaluation + scoped audit. Owner: **B**
 - **Done looks like:**
@@ -60,7 +60,7 @@ Status values: `not started` → `in progress` → `demo path works` → `done`.
   - `evidenceStrength` is `thin` (<2 graded answers), `mixed` (grade spread ≥2) or `strong`. Anything not `strong` gets `needsHumanReview: true`.
   - One separate auditor call (different system prompt) returns an `Audit` against the fixed 3-item checklist, rendered as a visible report section.
   - The counterfactual rescoring is **precomputed on the golden sample only**.
-- **Status:** not started. The precomputed evaluation and audit for the sample are in the fixture (the stage backup already exists).
+- **Status:** demo path works. B's merged evaluator/validator/auditor feed A3's cached report API. Exact citations are checked against saved transcript text; private identity values mask scoring copies without rewriting saved turns. Complete anonymization is not guaranteed.
 
 ### Pillar 4: Integrity monitoring. Owner: **C** tab/paste capture / **D** face capture / **B** fusion
 - **Done looks like:**
@@ -69,7 +69,7 @@ Status values: `not started` → `in progress` → `demo path works` → `done`.
   - The recruiter sees the level + every signal's value, threshold, points and benign explanations.
   - The candidate is told before starting what is monitored.
 - **HARD REQUIREMENT:** never output a binary "cheating: yes/no". The output is a concern level that prompts human review, and it never changes any score. This sentence must appear in the fusion code and in any prompt for this pillar.
-- **Status:** not started. The reference fusion is in `scripts/build-golden-fixture.mjs` (`fuseIntegrity`), and the fixture shows `Medium (3 pts)`.
+- **Status:** in progress. B's fusion is connected; browser capture remains C/D integration work. A3 marks latency unavailable until actual browser TTS completion is coordinated. Integrity never changes scores.
 
 ### Stretch: hash-chained record. Owner: **D**
 - `entryHash = sha256("v1|prevHash|seq|kind|refId|canonical_json(payload)")` over turns → decisions → evaluation. The genesis `prevHash` is 64 zeros. Canonical JSON uses sorted keys and drops undefined values.
@@ -111,7 +111,7 @@ Build against the fixture until the upstream pillar is live. `LLM_MODE=mock` mak
 
 ### A1 contract additions (implemented; A owns further changes)
 
-The optional workspace/artifact types below exist in `src/types/pipeline.ts`; API/module types are in `src/types/pipeline-api.ts`. Client projections, independent fixtures, A2 runtime validation and deterministic state transitions are implemented. Persistence uses an explicitly labeled mock until D's durable service is connected. B/C/D consume the A1 foundation commit before connecting live modules. Any further contract change still follows §6.
+The optional workspace/artifact types below exist in `src/types/pipeline.ts`; API/module types are in `src/types/pipeline-api.ts`. A1 projections, A2 state transitions and A3 plan/report APIs are implemented. B's modules are integrated. Persistence uses an explicitly labeled mock until D's durable service is connected. Any further contract change still follows §6.
 
 - Add optional `QuestionLadder.workspace`: `{ kind: "code" } | { kind: "whiteboard"; prompt: string }`. A code workspace requires `codeSnippet`. Existing technical plans with a snippet and no workspace continue to select code mode. A whiteboard workspace uses its prompt at `scenarioTwist`; other rungs use the existing ladder.
 - Add optional `Turn.artifacts: AnswerArtifact[]`, where `AnswerArtifact` is `{ kind: "code"; language: string; code: string } | { kind: "whiteboard"; sceneJson: string }`. Version 1 allows at most one artifact per candidate turn, matching that question's workspace. The parent turn provides ID, claim and timing; no new artifact citation format is introduced.

@@ -2,8 +2,6 @@ import "server-only";
 
 import { PipelineError } from "./errors";
 
-const headers = { "Cache-Control": "no-store", "X-Pipeline-Mode": "mock" };
-
 export async function readJson(request: Request): Promise<unknown> {
   try {
     return await request.json();
@@ -13,7 +11,14 @@ export async function readJson(request: Request): Promise<unknown> {
 }
 
 export function jsonResponse(body: unknown, status = 200): Response {
-  return Response.json(body, { status, headers });
+  return Response.json(body, {
+    status,
+    headers: {
+      "Cache-Control": "no-store",
+      "X-Pipeline-Mode": process.env.LLM_MODE === "mock" ? "mock" : "gemini",
+      "X-Pipeline-Storage": "mock-memory",
+    },
+  });
 }
 
 export function errorResponse(error: unknown): Response {
@@ -22,7 +27,12 @@ export function errorResponse(error: unknown): Response {
   }
   // Model/provider failures are retryable. Do not return provider payloads or candidate data.
   return jsonResponse(
-    { error: { code: "UPSTREAM_FAILURE", message: "The turn could not be processed. Retry it." } },
+    {
+      error: {
+        code: "UPSTREAM_FAILURE",
+        message: "The operation could not be processed. Retry it.",
+      },
+    },
     502,
   );
 }
