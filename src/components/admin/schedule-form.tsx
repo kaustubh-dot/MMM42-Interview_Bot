@@ -1,14 +1,14 @@
 "use client";
 
 import { PipelineApiError, createPlan, newRequestId } from "@/components/pipeline/api-client";
-import { Explainer, NbButton, NbLinkButton } from "@/components/pipeline/ui";
+import { NbButton, NbLinkButton } from "@/components/pipeline/ui";
 import { EARLY_JOIN_MIN, toLocalInputValue } from "@/lib/admin/invite";
 import type { CandidateKind } from "@/lib/admin/types";
 import { FileText, Loader2, Upload } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { addCandidate, useAdmin } from "./admin-store";
-import { Field } from "./admin-ui";
+import { Field, PageHeader } from "./admin-ui";
 
 const MAX_PDF_BYTES = 5 * 1024 * 1024; // the plan route's limit
 const DURATIONS = [15, 20, 30];
@@ -125,16 +125,13 @@ export function ScheduleForm({ initialJobId }: { initialJobId?: string }) {
   };
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
-      <header className="space-y-2">
-        <h1 className="text-3xl font-black tracking-tight md:text-4xl">Schedule an interview</h1>
-        <p className="text-lg text-gray-700">
-          We read the candidate's resume against the job and plan the questions now. You get a link
-          to send them.
-        </p>
-      </header>
+    <div className="mx-auto max-w-3xl space-y-5">
+      <PageHeader
+        title="Schedule an interview"
+        subtitle={`We plan the questions from the resume and job now. The candidate's link opens ${EARLY_JOIN_MIN} minutes before their time.`}
+      />
 
-      <section className="nb-card space-y-5 p-6">
+      <section className="nb-card space-y-4 p-4">
         <div className="grid gap-5 md:grid-cols-2">
           <Field id="sched-job" label="Job">
             <select
@@ -211,7 +208,7 @@ export function ScheduleForm({ initialJobId }: { initialJobId?: string }) {
             ).map(([value, title, body]) => (
               <label
                 key={value}
-                className={`flex cursor-pointer items-start gap-3 rounded-2xl border-2 border-[#111] p-4 ${source === value ? "nb-bg-soft-lavender shadow-[3px_3px_0_#111]" : "bg-white"}`}
+                className={`flex cursor-pointer items-start gap-3 rounded-lg border-[1.5px] border-[#111] p-3 ${source === value ? "nb-bg-soft-lavender shadow-[3px_3px_0_#111]" : "bg-white"}`}
               >
                 <input
                   type="radio"
@@ -281,7 +278,7 @@ export function ScheduleForm({ initialJobId }: { initialJobId?: string }) {
         )}
 
         <div className="flex flex-wrap items-center gap-3">
-          <NbButton variant="primary" size="lg" disabled={busy} onClick={submit}>
+          <NbButton variant="primary" disabled={busy} onClick={submit}>
             {busy && <Loader2 className="h-5 w-5 animate-spin" />}
             {busy ? "Planning the questions…" : "Schedule & get invite link"}
           </NbButton>
@@ -290,19 +287,6 @@ export function ScheduleForm({ initialJobId }: { initialJobId?: string }) {
           </span>
         </div>
       </section>
-
-      <Explainer title="What happens when I schedule?">
-        <p>
-          The resume is matched against the job description to find the claims that matter most.
-          Each becomes a topic with a ladder of questions. The vaguest claims the job needs most are
-          asked first.
-        </p>
-        <p>
-          The candidate gets a link that opens {EARLY_JOIN_MIN} minutes before the scheduled time.
-          They're told what is monitored before they start. When they finish, the report appears in
-          your console automatically.
-        </p>
-      </Explainer>
     </div>
   );
 }

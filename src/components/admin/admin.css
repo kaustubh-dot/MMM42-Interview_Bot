@@ -1,0 +1,49 @@
+/* Recruiter console: a quieter, denser take on the .nb theme (scoped to .nb-admin). */
+.nb-admin {
+  font-size: 15px;
+}
+.nb-admin .nb-card {
+  border-width: 1.5px;
+  border-radius: 0.75rem;
+  box-shadow: none;
+}
+.nb-admin .nb-card.hoverable:hover {
+  transform: none;
+  box-shadow: none;
+  background: #fafafa;
+}
+.nb-admin .nb-btn,
+.nb-admin .nb-btn.sm,
+.nb-admin .nb-btn.lg {
+  height: 34px;
+  padding: 0 12px;
+  font-size: 14px;
+  border-width: 1.5px;
+  border-radius: 6px;
+  box-shadow: 2px 2px 0 var(--nb-ink);
+}
+.nb-admin .nb-btn:hover {
+  transform: translate(1px, 1px);
+  box-shadow: 1px 1px 0 var(--nb-ink);
+}
+.nb-admin .nb-btn:disabled {
+  box-shadow: none;
+}
+.nb-admin .nb-pill {
+  border-width: 1px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0 0.5rem;
+}
+.nb-admin .nb-input {
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  font-size: 0.95rem;
+}
+.nb-admin th {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #555;
+}
