@@ -35,22 +35,23 @@ const useTabSwitchPrevention = () => {
   return { isDialogOpen, tabSwitchCount, handleUnderstand };
 };
 
-function TabSwitchWarning() {
-  const { isDialogOpen, handleUnderstand } = useTabSwitchPrevention();
-
+// Controlled by the caller's single hook instance. It used to call useTabSwitchPrevention()
+// itself, which created a second listener whose count disagreed with the stored one.
+function TabSwitchWarning({ open, onUnderstand }: { open: boolean; onUnderstand: () => void }) {
   return (
-    <AlertDialog open={isDialogOpen}>
+    <AlertDialog open={open}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Warning: Tab Switching</AlertDialogTitle>
+          <AlertDialogTitle>You left the interview tab</AlertDialogTitle>
           <AlertDialogDescription>
-            Switching tabs may degrade your interview performance. Tab switching is tracked.
+            Tab switches are noted for a person to review. Nothing is blocked, and it does not
+            change your scores.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogAction
             className="bg-indigo-400 hover:bg-indigo-600 text-white"
-            onClick={handleUnderstand}
+            onClick={onUnderstand}
           >
             I understand
           </AlertDialogAction>
