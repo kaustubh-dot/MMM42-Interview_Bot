@@ -55,9 +55,12 @@ export async function isRecruiterSession(token: string | undefined): Promise<boo
   return !!token && !!expected && equalHex(token, expected);
 }
 
-/** Only same-site paths are allowed after sign-in, never an external URL. */
+/**
+ * Only same-site paths are allowed after sign-in, never an external URL. A leading "//" is a
+ * protocol-relative URL; a leading "/\" (or any backslash right after the first slash) is the
+ * same attack, because browsers and some URL parsers normalize "\" to "/" before navigating, so
+ * "/\evil.com" becomes "//evil.com" -- both must be rejected, not just the plain "//" form.
+ */
 export function safeNext(next: unknown, fallback: string): string {
-  return typeof next === "string" && next.startsWith("/") && !next.startsWith("//")
-    ? next
-    : fallback;
+  return typeof next === "string" && (next === "/" || /^\/[^/\\]/.test(next)) ? next : fallback;
 }

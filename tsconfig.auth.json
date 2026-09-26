@@ -1,0 +1,4 @@
+{
+  "extends": "./tsconfig.foundation.json",
+  "include": ["src/lib/auth/*.ts"]
+}

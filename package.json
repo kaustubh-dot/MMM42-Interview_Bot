@@ -7,6 +7,7 @@
     "test:foundation": "npm run build:foundation && node --conditions=react-server --test tests/pipeline-foundation.test.cjs",
     "test:a2": "tsc -p tsconfig.a2.json && node --conditions=react-server --test tests/pipeline-a2.test.cjs",
     "test:persistence": "tsc -p tsconfig.a2.json && node --conditions=react-server --test tests/pipeline-persistence.test.cjs",
+    "test:auth": "tsc -p tsconfig.auth.json && node --test tests/auth-session.test.cjs",
     "fixture:client": "npm run build:foundation && node --conditions=react-server scripts/build-client-fixture.cjs && biome check --write src/fixtures/client-golden-interview.ts",
     "dev": "next dev --webpack",
     "build": "next build --webpack",
