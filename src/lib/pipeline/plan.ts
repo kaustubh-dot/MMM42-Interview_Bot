@@ -141,6 +141,20 @@ export function validatePlan(
       !resumeText.includes(claim.resumeEvidence) ||
       !jdText.includes(claim.jdRequirement)
     ) {
+      if (process.env.NODE_ENV !== "production" || process.env.PIPELINE_DEBUG === "1") {
+        console.error(
+          "[plan] rejected claim",
+          claim.id,
+          "dupId:",
+          ids.has(claim.id),
+          "resumeMiss:",
+          !resumeText.includes(claim.resumeEvidence),
+          JSON.stringify(claim.resumeEvidence),
+          "jdMiss:",
+          !jdText.includes(claim.jdRequirement),
+          JSON.stringify(claim.jdRequirement),
+        );
+      }
       return invalidPlan("Claims must have unique IDs and exact resume/JD evidence.");
     }
     ids.add(claim.id);
@@ -158,6 +172,9 @@ export function validatePlan(
         opening,
       )
     ) {
+      if (process.env.NODE_ENV !== "production" || process.env.PIPELINE_DEBUG === "1") {
+        console.error("[plan] rejected opening", claim.id, JSON.stringify(claim.ladder.initial));
+      }
       return invalidPlan(
         "An opening must name a resume detail and ask about its mechanism, trade-off or failure.",
       );
@@ -276,44 +293,96 @@ export async function generatePlan(form: FormData) {
 const FOLD: Record<string, string> = {
   "‘": "'",
   "’": "'",
+  "‚": "'",
   "“": '"',
   "”": '"',
+  "„": '"',
   "–": "-",
   "—": "-",
+  "‑": "-",
   "•": "",
+  "▪": "",
+  "●": "",
+  "‣": "",
+  "·": "",
   " ": " ",
+  "​": "",
+  "‌": "",
+  "‍": "",
+  "﻿": "",
+  "­": "",
+  ﬀ: "ff",
+  ﬁ: "fi",
+  ﬂ: "fl",
+  ﬃ: "ffi",
+  ﬄ: "ffl",
+  ﬅ: "st",
+  ﬆ: "st",
 };
 
+const WRAP_HYPHEN_RE = /[-­‑][ \t]*\r?\n[ \t]*/g;
+
 /**
- * PDF text has line breaks, doubled spaces, bullets and curly quotes that models tidy up. Find the
- * excerpt in the source ignoring only those differences and case, and return the EXACT source span,
- * so the strict validator still guarantees the evidence is really in the document.
+ * PDF text has line breaks, doubled spaces, bullets, curly quotes, ligatures and wrap-hyphens that
+ * models tidy up. Find the excerpt in the source ignoring only those differences and case, and
+ * return the EXACT source span, so the strict validator still guarantees the evidence is really in
+ * the document. Returns null (never invents a match) if the excerpt truly isn't in the source.
  */
 export function snapToSource(excerpt: unknown, source: string): unknown {
-  if (typeof excerpt !== "string" || !excerpt.trim() || source.includes(excerpt)) {
+  if (typeof excerpt !== "string" || !excerpt.trim()) {
+    return excerpt;
+  }
+  if (source.includes(excerpt)) {
     return excerpt;
   }
   const fold = (ch: string) => (ch in FOLD ? FOLD[ch] : ch.toLowerCase());
-  let normSource = "";
-  const map: number[] = []; // normSource index -> source index
-  for (let i = 0; i < source.length; i++) {
-    const ch = /\s/.test(source[i]) ? " " : fold(source[i]);
-    if (ch === "" || (ch === " " && (normSource === "" || normSource.endsWith(" ")))) {
-      continue;
+  // A hyphen (or soft hyphen) directly before a line break is a PDF word-wrap join, not a real
+  // hyphen: "intro-" + newline + "ducing" is the single word "introducing". Collapse that pattern
+  // in the source before matching, tracking each kept character's original index.
+  let unwrapped = "";
+  const wrapMap: number[] = []; // unwrapped index -> source index
+  {
+    let last = 0;
+    WRAP_HYPHEN_RE.lastIndex = 0;
+    let m: RegExpExecArray | null = WRAP_HYPHEN_RE.exec(source);
+    while (m) {
+      for (let i = last; i < m.index; i++) {
+        unwrapped += source[i];
+        wrapMap.push(i);
+      }
+      last = m.index + m[0].length;
+      m = WRAP_HYPHEN_RE.exec(source);
     }
-    normSource += ch;
-    map.push(i);
+    for (let i = last; i < source.length; i++) {
+      unwrapped += source[i];
+      wrapMap.push(i);
+    }
   }
-  const needle = Array.from(excerpt)
-    .map((ch) => (/\s/.test(ch) ? " " : fold(ch)))
-    .join("")
-    .replace(/ +/g, " ")
-    .trim();
-  const at = needle ? normSource.indexOf(needle) : -1;
+  const normalize = (value: string, indexMap?: number[]) => {
+    let norm = "";
+    const map: number[] = []; // norm index -> original index
+    for (let i = 0; i < value.length; i++) {
+      const ch = /\s/.test(value[i]) ? " " : fold(value[i]);
+      if (ch === "" || (ch === " " && (norm === "" || norm.endsWith(" ")))) {
+        continue;
+      }
+      norm += ch;
+      // A ligature fold (e.g. "ﬁ" -> "fi") expands one input char into several output chars:
+      // push one map entry per OUTPUT char so norm.length and map.length always stay in sync.
+      for (let k = 0; k < ch.length; k++) {
+        map.push(indexMap ? indexMap[i] : i);
+      }
+    }
+    return { norm, map };
+  };
+  const { norm: normSource, map } = normalize(unwrapped, wrapMap);
+  const { norm: needle } = normalize(excerpt);
+  const trimmedNeedle = needle.trim();
+  const at = trimmedNeedle ? normSource.indexOf(trimmedNeedle) : -1;
   if (at < 0) {
-    return excerpt; // not really in the source: leave it for the validator to reject
+    return null; // not really in the source: the validator rejects rather than inventing a match
   }
-  return source.slice(map[at], map[at + needle.length - 1] + 1);
+  return source.slice(map[at], map[at + trimmedNeedle.length - 1] + 1);
 }
 
 /** Fix common model shape slips before strict validation; never invents claims or evidence. */
