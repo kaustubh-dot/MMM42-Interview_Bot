@@ -4,10 +4,18 @@ import type { InterviewReport } from "../../types/pipeline";
 import type { SavedSession } from "../../types/pipeline-api";
 import { PipelineError } from "./errors";
 
+/** Row metadata set once when an attempt is created. Never part of the scored record. */
+export interface AttemptMeta {
+  roleId?: string; // FoloUp interview (role) ID from a role link
+  candidateName?: string;
+  candidateEmail?: string;
+  identityValues?: readonly string[]; // private resume values for blind scoring
+}
+
 // MOCK ONLY: process-local memory is lost on restart and is not safe across server instances.
-// D's service replaces this object with the same create/load/CAS-save methods.
+// supabase-session-store.ts implements the same create/load/CAS-save methods durably.
 export interface SessionStore {
-  createSession(session: SavedSession): Promise<void>;
+  createSession(session: SavedSession, meta?: AttemptMeta): Promise<void>;
   loadSession(interviewId: string): Promise<SavedSession | null>;
   saveSession(session: SavedSession, expectedLastRequestId: string | null): Promise<void>;
 }

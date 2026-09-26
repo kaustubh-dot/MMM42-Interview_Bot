@@ -1,6 +1,7 @@
 import "server-only";
 
 import { PipelineError } from "./errors";
+import { storageMode } from "./session-store";
 
 export async function readJson(request: Request): Promise<unknown> {
   try {
@@ -16,7 +17,7 @@ export function jsonResponse(body: unknown, status = 200): Response {
     headers: {
       "Cache-Control": "no-store",
       "X-Pipeline-Mode": process.env.LLM_MODE === "mock" ? "mock" : "gemini",
-      "X-Pipeline-Storage": "mock-memory",
+      "X-Pipeline-Storage": storageMode,
     },
   });
 }

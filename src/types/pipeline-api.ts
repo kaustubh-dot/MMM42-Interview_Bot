@@ -59,6 +59,7 @@ export type ClientInterviewReport = Omit<InterviewReport, "record"> & {
 export interface StartRequest {
   interviewId: string;
   requestId: string;
+  roleId?: string; // optional FoloUp interview (role) ID; links the stored response row
 }
 
 export interface SubmitTurnRequest {

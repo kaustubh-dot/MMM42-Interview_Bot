@@ -7,8 +7,9 @@ import { toClientReport } from "./client-projection";
 import { PipelineError } from "./errors";
 import { evaluateRecord } from "./evaluate";
 import { fuseIntegrity } from "./integrity";
-import { type ReportStore, mockSessionStore } from "./mock-session-store";
+import type { ReportStore } from "./mock-session-store";
 import { scoringRecord } from "./scoring-context";
+import { sessionStore } from "./session-store";
 import { id, withInterviewLock } from "./turn-service";
 
 // Retain a completed result if saving fails so retrying does not run another auditor.
@@ -19,7 +20,7 @@ const state = globalThis as typeof globalThis & {
 const pending = state.mmm42PendingReports ?? new Map<string, InterviewReport>();
 state.mmm42PendingReports = pending;
 
-export async function generateReport(raw: unknown, store: ReportStore = mockSessionStore) {
+export async function generateReport(raw: unknown, store: ReportStore = sessionStore) {
   const interviewId = id(
     typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>).interviewId : null,
     "interviewId",
@@ -69,7 +70,7 @@ export async function generateReport(raw: unknown, store: ReportStore = mockSess
   });
 }
 
-export async function readReport(interviewId: string, store: ReportStore = mockSessionStore) {
+export async function readReport(interviewId: string, store: ReportStore = sessionStore) {
   const report = await store.loadReport(id(interviewId, "interviewId"));
   if (!report) {
     throw new PipelineError("REPORT_NOT_FOUND", "No saved report exists for this attempt.", 404);
