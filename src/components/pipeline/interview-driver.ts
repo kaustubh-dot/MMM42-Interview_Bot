@@ -69,11 +69,13 @@ function sampleAnswers(sample?: ClientInterviewReport) {
 export function createLiveDriver(
   interviewId: string,
   sample?: ClientInterviewReport,
+  roleId?: string,
 ): InterviewDriver {
   return {
     mode: "live",
     interviewId,
-    start: () => startInterview({ interviewId, requestId: newRequestId() }),
+    start: () =>
+      startInterview({ interviewId, requestId: newRequestId(), ...(roleId && { roleId }) }),
     submit: submitTurn,
     recover: async () => {
       const s = await getSession(interviewId);

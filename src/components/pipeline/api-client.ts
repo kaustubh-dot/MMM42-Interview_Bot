@@ -91,9 +91,14 @@ export async function createPlan(input: {
   resume: File;
   jdText?: string;
   jd?: File;
+  /** FoloUp role (interview.id) from a /interview?role= link; files the attempt under it. */
+  roleId?: string;
 }): Promise<ClientInterviewPlan> {
   const form = new FormData();
   form.append("resume", input.resume);
+  if (input.roleId) {
+    form.append("roleId", input.roleId);
+  }
   if (input.jd) {
     form.append("jd", input.jd);
   } else if (input.jdText) {

@@ -1,7 +1,7 @@
 # CLAUDE.md: source of truth for the hackathon build
 
 > If code and this file disagree, that is a bug. Fix whichever one is wrong, in the same change.
-> Last updated: 2026-09-26. A2 PR #4 is merged (`383068c`); A3 plan/report orchestration is implemented on `feat/interview-engine` using B's merged modules. Shared contracts are unchanged. Storage remains mock memory; see [A3 handoff](docs/handoffs/a3-plan-report.md).
+> Last updated: 2026-09-26. A2 PR #4 is merged (`383068c`); A3 plan/report orchestration is implemented on `feat/interview-engine` using B's merged modules. Shared contracts are unchanged except the optional `StartRequest.roleId`. D1 durable storage is implemented on `feat/persistence-deploy` behind `PIPELINE_STORAGE=supabase` (default remains mock memory); see [A3 handoff](docs/handoffs/a3-plan-report.md) and [D1 handoff](docs/handoffs/d1-persistence.md).
 > Assignment checklist: [Team implementation plan](docs/superpowers/plans/2026-09-26-team-kickoff.md). A, B and C start now; D joins later. Planned additions below are requirements, not claims of implemented behavior.
 
 ## 1. Summary
@@ -99,7 +99,7 @@ Status values: `not started` → `in progress` → `demo path works` → `done`.
 | P4 → UI | `IntegrityReport { level, totalPoints, signals[], disclaimer }` | Band only, never a verdict. |
 | All → UI | `InterviewReport { record, evaluation, audit, integrity }` | What the recruiter report page renders. |
 
-**Storage mapping (no schema change):** `response.details = InterviewRecord` and `response.analytics = { evaluation, audit, integrity }`. The existing `tab_switch_count` column stays in sync with the `tabBlur` count. Any new column needs team approval (TODO(team)).
+**Storage mapping (no schema change):** one `response` row per attempt, keyed by `response.call_id = plan.interviewId`; `response.interview_id` is the FoloUp role (`interview.id`) when the attempt came from `/interview?role=<id>`, otherwise null. `response.details = InterviewRecord` plus server-only `details.pipeline` session metadata, and `response.analytics = { evaluation, audit, integrity }`. Writes are compare-and-set on `details.pipeline.lastRequestId`. The existing `tab_switch_count` column stays in sync with the `tabBlur` count. Any new column needs team approval (TODO(team)).
 
 **Fixture:** `src/fixtures/golden-interview.ts` (typed) and `fixtures/golden-interview.json` (same data). Regenerate with `npm run fixture:golden`. The script asserts:
 - decisions follow the rule
@@ -111,7 +111,7 @@ Build against the fixture until the upstream pillar is live. `LLM_MODE=mock` mak
 
 ### A1 contract additions (implemented; A owns further changes)
 
-The optional workspace/artifact types below exist in `src/types/pipeline.ts`; API/module types are in `src/types/pipeline-api.ts`. A1 projections, A2 state transitions and A3 plan/report APIs are implemented. B's modules are integrated. Persistence uses an explicitly labeled mock until D's durable service is connected. Any further contract change still follows §6.
+The optional workspace/artifact types below exist in `src/types/pipeline.ts`; API/module types are in `src/types/pipeline-api.ts`. A1 projections, A2 state transitions and A3 plan/report APIs are implemented. B's modules are integrated. Persistence uses the labeled mock unless `PIPELINE_STORAGE=supabase` selects D1's `src/lib/pipeline/supabase-session-store.ts`. Any further contract change still follows §6.
 
 - Add optional `QuestionLadder.workspace`: `{ kind: "code" } | { kind: "whiteboard"; prompt: string }`. A code workspace requires `codeSnippet`. Existing technical plans with a snippet and no workspace continue to select code mode. A whiteboard workspace uses its prompt at `scenarioTwist`; other rungs use the existing ladder.
 - Add optional `Turn.artifacts: AnswerArtifact[]`, where `AnswerArtifact` is `{ kind: "code"; language: string; code: string } | { kind: "whiteboard"; sceneJson: string }`. Version 1 allows at most one artifact per candidate turn, matching that question's workspace. The parent turn provides ID, claim and timing; no new artifact citation format is introduced.

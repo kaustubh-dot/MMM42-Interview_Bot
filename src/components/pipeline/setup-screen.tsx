@@ -7,6 +7,8 @@ import type { ClientInterviewPlan } from "./contract";
 import { Explainer, NbButton } from "./ui";
 
 interface Props {
+  /** FoloUp role from a /interview?role= link. */
+  roleId?: string;
   onPlan: (plan: ClientInterviewPlan) => void;
   /** Start the demo; the technical question opens a code editor or a whiteboard. */
   onUseSample: (workspace: "code" | "whiteboard") => void;
@@ -50,7 +52,7 @@ function FilePicker({
   );
 }
 
-export function SetupScreen({ onPlan, onUseSample }: Props) {
+export function SetupScreen({ roleId, onPlan, onUseSample }: Props) {
   const [demoWorkspace, setDemoWorkspace] = useState<"code" | "whiteboard">("code");
   const [resume, setResume] = useState<File | null>(null);
   const [jdFile, setJdFile] = useState<File | null>(null);
@@ -93,6 +95,7 @@ export function SetupScreen({ onPlan, onUseSample }: Props) {
     try {
       const plan = await createPlan({
         resume,
+        roleId,
         ...(jdFile ? { jd: jdFile } : { jdText: jdText.trim() }),
       });
       onPlan(plan);
