@@ -38,6 +38,7 @@ interface Recognition {
 type RecognitionCtor = new () => Recognition;
 
 export type SpeechStatus = "idle" | "listening" | "speaking";
+export type VoiceEngine = "natural" | "browser" | null;
 
 export interface SpeechError {
   code: string;
@@ -91,8 +92,10 @@ export function useInterviewSpeech({ onFinalChunk, lang = "en-US" }: Options) {
   const [interim, setInterim] = useState("");
   const [error, setError] = useState<SpeechError | null>(null);
   const [firstSpeechAtPerf, setFirstSpeechAtPerf] = useState<number | null>(null);
+  const [voiceEngine, setVoiceEngine] = useState<VoiceEngine>(null);
 
   const recognitionRef = useRef<Recognition | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const wantListeningRef = useRef(false);
   const speakingRef = useRef(false);
   const firstSpeechRef = useRef<number | null>(null);
@@ -216,16 +219,56 @@ export function useInterviewSpeech({ onFinalChunk, lang = "en-US" }: Options) {
     setStatus(speakingRef.current ? "speaking" : "idle");
   }, [stopRecognition]);
 
-  /** Speaks the question. Recognition is paused for the duration and resumed if it was on. */
-  const speak = useCallback(
+  /** Tries the natural-voice API. Resolves false (never rejects) on any failure or absence. */
+  const speakNatural = useCallback((text: string): Promise<boolean> => {
+    if (typeof window === "undefined" || typeof Audio === "undefined") {
+      return Promise.resolve(false);
+    }
+    return fetch("/api/pipeline/tts", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text }),
+    })
+      .then((res) => (res.ok ? res.blob() : null))
+      .then(
+        (blob) =>
+          new Promise<boolean>((resolve) => {
+            if (!blob || !blob.size) {
+              resolve(false);
+              return;
+            }
+            const url = URL.createObjectURL(blob);
+            const audio = new Audio(url);
+            audioRef.current = audio;
+            let done = false;
+            const finish = (ok: boolean) => {
+              if (done) {
+                return;
+              }
+              done = true;
+              clearTimeout(guard);
+              URL.revokeObjectURL(url);
+              if (audioRef.current === audio) {
+                audioRef.current = null;
+              }
+              resolve(ok);
+            };
+            // The audio element reliably fires onended/onerror, but guard anyway.
+            const guard = setTimeout(() => finish(true), 4000 + text.length * 90);
+            audio.onended = () => finish(true);
+            audio.onerror = () => finish(false);
+            audio.play().catch(() => finish(false));
+          }),
+      )
+      .catch(() => false);
+  }, []);
+
+  /** Browser speechSynthesis fallback. Always resolves. */
+  const speakBrowser = useCallback(
     (text: string): Promise<void> => {
       if (typeof window === "undefined" || !("speechSynthesis" in window)) {
         return Promise.resolve();
       }
-      const resume = wantListeningRef.current;
-      stopRecognition();
-      speakingRef.current = true;
-      setStatus("speaking");
       window.speechSynthesis.cancel();
       return new Promise<void>((resolve) => {
         let done = false;
@@ -235,12 +278,6 @@ export function useInterviewSpeech({ onFinalChunk, lang = "en-US" }: Options) {
           }
           done = true;
           clearTimeout(guard);
-          speakingRef.current = false;
-          setStatus("idle");
-          if (resume) {
-            wantListeningRef.current = true;
-            startRecognition();
-          }
           resolve();
         };
         // Chrome sometimes never fires onend; cap by a generous reading-time estimate.
@@ -253,10 +290,40 @@ export function useInterviewSpeech({ onFinalChunk, lang = "en-US" }: Options) {
         window.speechSynthesis.speak(utterance);
       });
     },
-    [lang, startRecognition, stopRecognition],
+    [lang],
+  );
+
+  /**
+   * Speaks the question: tries the natural voice API first, falls back to the browser voice on
+   * any failure (feature off, terms not accepted, rate limited, offline). Recognition is paused
+   * for the duration and resumed if it was on, exactly as before.
+   */
+  const speak = useCallback(
+    async (text: string): Promise<void> => {
+      const resume = wantListeningRef.current;
+      stopRecognition();
+      speakingRef.current = true;
+      setStatus("speaking");
+      const ok = await speakNatural(text);
+      setVoiceEngine(ok ? "natural" : "browser");
+      if (!ok) {
+        await speakBrowser(text);
+      }
+      speakingRef.current = false;
+      setStatus("idle");
+      if (resume) {
+        wantListeningRef.current = true;
+        startRecognition();
+      }
+    },
+    [speakNatural, speakBrowser, startRecognition, stopRecognition],
   );
 
   const cancelSpeech = useCallback(() => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       window.speechSynthesis.cancel();
     }
@@ -275,6 +342,10 @@ export function useInterviewSpeech({ onFinalChunk, lang = "en-US" }: Options) {
     return () => {
       wantListeningRef.current = false;
       stopRecognition();
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
       if (typeof window !== "undefined" && "speechSynthesis" in window) {
         window.speechSynthesis.cancel();
       }
@@ -287,6 +358,8 @@ export function useInterviewSpeech({ onFinalChunk, lang = "en-US" }: Options) {
     interim,
     error,
     firstSpeechAtPerf,
+    /** Which voice spoke the last question: "natural" (server TTS) or "browser" (fallback). */
+    voiceEngine,
     /** Call when the candidate types, so typed answers also get a start time. */
     markFirstSpeech,
     /** performance.now() of the last heard speech in this answer, or null. */

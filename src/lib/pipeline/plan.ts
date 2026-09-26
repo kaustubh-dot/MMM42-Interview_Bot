@@ -64,13 +64,22 @@ Produce 1 to 8 distinct claims. Each has a unique id c1, c2, etc., skillArea, is
 resumeEvidence (an exact nonempty resume excerpt), jdRequirement (an exact nonempty JD excerpt),
 jdWeight and specificity (each 0 to 1), and ladder. Do not invent experience or requirements.
 Each ladder has fundamental, initial, termFollowUpTemplate, scenarioTwist, whyDefenseTemplate.
+
+VOICE: every question in every ladder field is read aloud by a text-to-speech voice, so write it the
+way a warm, curious human interviewer would actually SAY it in a live conversation, never the way it
+would be written in a form or a spec. Use contractions (you've, what's, didn't). Keep it to one or two
+short sentences that flow naturally when spoken, ending in exactly one question. Avoid stiff, listy or
+overly formal phrasing ("Please elaborate on", "Describe the process by which", "Kindly walk through");
+prefer how a colleague would ask it over coffee. A brief natural lead-in before the question is fine
+(e.g. "Nice — ", "Okay, "), as long as the rules below still hold.
+
 The opening must name a concrete detail in resumeEvidence and ask how it worked, a trade-off, or a failure.
 Do not use generic tell-me-about-yourself/tool/background questions. Ideally quote resumeEvidence.
 Every opening (ladder.initial) MUST: be a direct question to the candidate using "you" or "your"; repeat
 a distinctive word (5+ letters) from resumeEvidence; and ask how or why something worked, what trade-off
 was made, or what broke or failed. Never start with "Describe", "Walk me through" or "Tell me about".
-Example: "You cut catalog API p95 latency by 40% with Redis. How did you decide what to cache, and what
-broke when cached data went stale?"
+Example: "You cut catalog API p95 latency by 40% with Redis — nice. How did you decide what to cache,
+and what broke when cached data went stale?"
 Use {{term}} only in termFollowUpTemplate and {{quote}} only in whyDefenseTemplate.
 Each technical claim's ladder (put these fields INSIDE ladder, not on the claim) has either
 workspace {kind:"code"} plus codeSnippet {language,code,plantedIssue},

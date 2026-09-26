@@ -580,6 +580,18 @@ export function InterviewScreen({
             {claim && <span className="nb-pill">{claim.skillArea}</span>}
             <span className="nb-pill nb-bg-soft-lavender">{FRIENDLY_RUNGS[question.rung]}</span>
             {driver.mode === "live" && <ModeLabel />}
+            {speech.voiceEngine && (
+              <span
+                className="nb-pill"
+                title={
+                  speech.voiceEngine === "natural"
+                    ? "Spoken by a natural-sounding AI voice"
+                    : "Natural voice unavailable right now; using the browser's built-in voice"
+                }
+              >
+                {speech.voiceEngine === "natural" ? "🔊 Natural voice" : "🔈 Browser voice"}
+              </span>
+            )}
           </div>
           <div className="h-3 w-full overflow-hidden rounded-full border-2 border-[#111] bg-white">
             <div

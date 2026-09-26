@@ -128,3 +128,58 @@ export async function generateJson(request: LlmRequest): Promise<unknown> {
   }
   return parseJsonText(text);
 }
+
+export interface SpeechResult {
+  audio: ArrayBuffer;
+  contentType: string;
+}
+
+// Orpheus needs a one-time terms acceptance in the Groq console before the API will serve it;
+// until then (or if disabled/misconfigured/rate-limited/offline) callers get null and fall back
+// to the browser's built-in voice. Narration is a demo enhancement, never a blocking dependency.
+const GROQ_TTS_MODEL = process.env.GROQ_TTS_MODEL?.trim() || "canopylabs/orpheus-v1-english";
+const GROQ_TTS_VOICE = process.env.GROQ_TTS_VOICE?.trim() || "tara";
+const GROQ_TTS_FORMAT = process.env.GROQ_TTS_FORMAT?.trim() || "wav";
+const TTS_CONTENT_TYPES: Record<string, string> = { wav: "audio/wav", mp3: "audio/mpeg" };
+
+function logTtsFailure(...args: unknown[]): void {
+  if (process.env.NODE_ENV !== "production" || process.env.PIPELINE_DEBUG === "1") {
+    console.error("[tts]", ...args);
+  }
+}
+
+/** Best-effort natural-voice narration. Never throws: any failure returns null. */
+export async function generateSpeech(text: string): Promise<SpeechResult | null> {
+  if (process.env.LLM_MODE !== "groq") {
+    return null;
+  }
+  const apiKey = process.env.GROQ_API_KEY?.trim();
+  if (!apiKey) {
+    return null;
+  }
+  try {
+    const response = await fetch("https://api.groq.com/openai/v1/audio/speech", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: GROQ_TTS_MODEL,
+        voice: GROQ_TTS_VOICE,
+        input: text,
+        response_format: GROQ_TTS_FORMAT,
+      }),
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!response.ok) {
+      logTtsFailure("request failed", response.status, await response.text().catch(() => ""));
+      return null;
+    }
+    const audio = await response.arrayBuffer();
+    if (!audio.byteLength) {
+      return null;
+    }
+    return { audio, contentType: TTS_CONTENT_TYPES[GROQ_TTS_FORMAT] ?? "audio/wav" };
+  } catch (error) {
+    logTtsFailure("request threw", error instanceof Error ? error.message : error);
+    return null;
+  }
+}

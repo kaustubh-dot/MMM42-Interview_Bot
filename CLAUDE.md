@@ -22,8 +22,9 @@ We are building an AI interview platform on top of the FoloUp codebase (Next.js 
 |---|---|---|
 | App | Next.js 16 (`--webpack`), React 18, TypeScript | Already in FoloUp. API routes host the turn loop. |
 | DB + storage | Supabase (`supabase_schema.sql`) | Already in FoloUp. Pipeline data goes in the existing `response.details` / `response.analytics` JSONB, so no migration is needed. |
-| LLM | Gemini 2.5 Flash via `@google/genai`, JSON mode | Already in FoloUp. Fast and cheap enough for a grade call every turn. |
-| Speech | Browser Web Speech API (`SpeechRecognition` + `speechSynthesis`) | No new library. We control every turn, so the selection rule and latency signal are possible. **Chrome only.** |
+| LLM | Groq (`openai/gpt-oss-120b` plan/evaluate/audit, `openai/gpt-oss-20b` grading) via plain `fetch`, JSON mode; Gemini 2.5 Flash kept as a second `LLM_MODE=gemini` path | No new SDK (Groq is OpenAI-compatible). Fast/cheap enough for a grade call every turn; separate models keep separate per-model rate limits. |
+| Speech (input) | Browser Web Speech API `SpeechRecognition` | No new library. We control every turn, so the selection rule and latency signal are possible. **Chrome only.** |
+| Speech (output) | Groq Orpheus TTS (`canopylabs/orpheus-v1-english`, same `GROQ_API_KEY`), server route `api/pipeline/tts`, with automatic fallback to the browser's `speechSynthesis` | No new dependency (same key, plain `fetch`). Needs a one-time terms acceptance in the Groq console; until accepted (or on any failure/rate limit) it silently falls back, never blocks. The UI shows a "🔊 Natural voice" / "🔈 Browser voice" chip so it's obvious which is active. |
 | Face / gaze signals | `@mediapipe/tasks-vision` Face Landmarker, **approved new library**, flag `NEXT_PUBLIC_FACE_SIGNALS=on\|off` | Runs in the browser, so no video leaves the device. Adds face-count and gaze signals. If it fails to load, the band ignores those signals. |
 | PDF parsing | `src/actions/parse-pdf.ts` (LangChain PDFLoader) | Already in FoloUp. Reused for both resume and JD. |
 | UI | Tailwind + shadcn/Radix (existing `src/components/ui`) | Already in FoloUp. |
